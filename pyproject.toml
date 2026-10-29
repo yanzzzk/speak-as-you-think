@@ -1,0 +1,15 @@
+[project]
+name = "drama3-live"
+version = "0.1.0"
+description = "Streaming speech for realtime voice agents on Fish Audio Drama 3"
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["drama3_live"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

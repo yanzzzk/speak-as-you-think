@@ -1,0 +1,8 @@
+{"id": "en_weather", "lang": "en", "text": "Tomorrow looks mostly sunny, with a high of 24 degrees and a light breeze from the west. Rain is unlikely until Thursday evening, so it's a good day for a walk. If you're heading out early, bring a jacket, since mornings are still around 12 degrees."}
+{"id": "en_support", "lang": "en", "text": "I'm sorry about the delay with your order. I checked, and it shipped yesterday at 3:40 in the afternoon. It should arrive by Friday, but if it doesn't, I can send a replacement right away. Is there anything else I can help you with today?"}
+{"id": "en_story", "lang": "en", "text": "It was late, and the hall was empty. She knocked twice and waited, listening to the rain against the windows. Nobody answered. Then, very slowly, the door at the far end began to open."}
+{"id": "en_explain", "lang": "en", "text": "A voice agent has three main parts. First, speech recognition turns what you say into text. Second, a language model decides what to say back. Third, text to speech reads the answer aloud, and the faster that last step starts, the more natural the conversation feels."}
+{"id": "en_booking", "lang": "en", "text": "Great, I've booked a table for four at 7:30 on Saturday. The restaurant asked me to mention that the patio may close if it gets windy. You'll get a confirmation text in a few minutes, and you can cancel for free until noon that day."}
+{"id": "zh_weather", "lang": "zh", "text": "明天整体以晴为主，最高气温二十四度，西风两到三级。周四傍晚之前基本不会下雨，很适合出去走走。不过早上还比较凉，出门的话记得带件外套。"}
+{"id": "zh_support", "lang": "zh", "text": "非常抱歉让您久等了。我刚帮您查了一下，订单已经在昨天下午发出了，预计周五之前送到。如果到时候还没收到，我可以马上为您补发一份。请问还有什么可以帮您的吗？"}
+{"id": "zh_story", "lang": "zh", "text": "夜已经很深了，走廊里一个人也没有。她轻轻敲了两下门，静静地等着，窗外的雨一直下个不停。没有人回应。过了很久，走廊尽头的那扇门，慢慢地打开了。"}

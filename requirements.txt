@@ -1,0 +1,9 @@
+# Core and tests (laptop is fine)
+numpy
+soundfile
+jiwer
+pytest
+
+# Scoring (GPU machine; fish-speech already brings torch and torchaudio)
+faster-whisper
+speechbrain

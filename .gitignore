@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.DS_Store
+
+results/
+checkpoints/
+data/ref/*
+!data/ref/.gitkeep
