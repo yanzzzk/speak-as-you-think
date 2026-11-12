@@ -1,7 +1,10 @@
-"""Score a week-1 run: ASR errors, lookahead leakage, speaker similarity, timeline.
+"""Score week-1 runs: ASR errors, lookahead leakage, speaker similarity, seams, timeline.
 
-Writes <run>/scores.csv (one row per text and variant) and prints the mean per
-variant. Error rates are WER for English and CER for Chinese.
+Writes, in each run directory (one seed folder of week1_run.py):
+  scores.csv   one row per text and variant
+  seams.csv    one row per seam between chunks: kind of cut and pause length
+and prints the means per variant over all runs given. Error rates are WER for
+English and CER for Chinese.
 """
 
 import argparse
@@ -9,37 +12,46 @@ import csv
 import json
 import statistics
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 
+import soundfile as sf
 import torch
 import torchaudio
 
 from drama3_live.scoring import error_rate, leaked
+from drama3_live.seams import edge_silence, seam_rows
 from drama3_live.timeline import playback_timeline
 
 COLUMNS = (
     "text_id",
     "lang",
     "variant",
+    "seed",
     "chunks",
     "err_all",
     "err_chunk_mean",
     "leak_rate",
     "sim_all",
     "sim_chunk_min",
+    "sim_first",
+    "sim_last",
     "first_chunk_s",
     "stall_s",
     "stalls",
     "rtf",
     "hit_max_tokens",
 )
+SEAM_COLUMNS = ("text_id", "lang", "variant", "seed", "seam", "kind", "time_s", "pause_s", "at")
 # Lower is better for these; higher for the rest.
 LOWER_IS_BETTER = {"err_all", "err_chunk_mean", "leak_rate", "first_chunk_s", "stall_s", "rtf"}
+SAMPLE_RATE = 16000  # what the speaker model expects
+WINDOW_S = 6.0  # voice drift: similarity of the first vs the last window of all.wav
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("run", type=Path, help="results directory of week1_run.py")
+    parser.add_argument("runs", nargs="+", type=Path, help="seed folders of week1_run.py")
     parser.add_argument("--asr-model", default="large-v3")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--ref-audio", type=Path, help="default: the one in run.json")
@@ -61,36 +73,53 @@ class Scorer:
         segments, _ = self.asr.transcribe(str(path), language=lang, beam_size=5)
         return " ".join(segment.text.strip() for segment in segments)
 
+    def load(self, path: Path) -> torch.Tensor:
+        """Mono waveform at SAMPLE_RATE, [1, samples]."""
+        samples, sr = sf.read(path, dtype="float32", always_2d=True)
+        wav = torch.from_numpy(samples).mean(dim=1).unsqueeze(0)
+        return torchaudio.functional.resample(wav, sr, SAMPLE_RATE)
+
     @torch.inference_mode()
-    def embed(self, path: Path) -> torch.Tensor:
-        wav, sr = torchaudio.load(str(path))
-        wav = torchaudio.functional.resample(wav.mean(dim=0, keepdim=True), sr, 16000)
+    def embed(self, wav: torch.Tensor) -> torch.Tensor:
         return self.speaker.encode_batch(wav).flatten()
 
     def similarity(self, a: torch.Tensor, b: torch.Tensor) -> float:
         return torch.nn.functional.cosine_similarity(a, b, dim=0).item()
 
+    def window_similarities(self, wav: torch.Tensor, ref: torch.Tensor) -> list[float]:
+        """Similarity to the reference of consecutive windows of about WINDOW_S."""
+        count = max(1, round(wav.shape[1] / (WINDOW_S * SAMPLE_RATE)))
+        parts = torch.tensor_split(wav, count, dim=1)
+        return [self.similarity(self.embed(part), ref) for part in parts]
 
-def score_variant(scorer: Scorer, folder: Path, ref_embedding: torch.Tensor) -> dict:
+
+def score_variant(
+    scorer: Scorer, folder: Path, ref_embedding: torch.Tensor
+) -> tuple[dict, list[dict]]:
     meta = json.loads((folder / "meta.json").read_text())
     lang, chunks = meta["lang"], meta["chunks"]
-    errors, leaks, sims = [], [], []
+    errors, leaks, sims, edges = [], [], [], []
     for index, chunk in enumerate(chunks):
-        wav = folder / f"chunk_{index:02d}.wav"
+        path = folder / f"chunk_{index:02d}.wav"
         if chunk["frames"] == 0:
             errors.append(1.0)
+            edges.append((0.0, 0.0))
             continue
-        transcript = scorer.transcribe(wav, lang)
+        transcript = scorer.transcribe(path, lang)
         errors.append(error_rate(chunk["text"], transcript, lang))
         if chunk["lookahead"]:
             leaks.append(leaked(chunk["text"], chunk["lookahead"], transcript, lang))
+        wav = scorer.load(path)
         sims.append(scorer.similarity(scorer.embed(wav), ref_embedding))
+        edges.append(edge_silence(wav[0].numpy(), SAMPLE_RATE))
 
     all_wav = folder / "all.wav"
+    whole = scorer.load(all_wav)
+    windows = scorer.window_similarities(whole, ref_embedding)
     timeline = playback_timeline(
         [c["gen_seconds"] for c in chunks], [c["audio_seconds"] for c in chunks]
     )
-    return {
+    row = {
         "text_id": meta["text_id"],
         "lang": lang,
         "variant": meta["variant"],
@@ -98,52 +127,87 @@ def score_variant(scorer: Scorer, folder: Path, ref_embedding: torch.Tensor) -> 
         "err_all": error_rate(meta["text"], scorer.transcribe(all_wav, lang), lang),
         "err_chunk_mean": statistics.mean(errors),
         "leak_rate": statistics.mean(leaks) if leaks else 0.0,
-        "sim_all": scorer.similarity(scorer.embed(all_wav), ref_embedding),
+        "sim_all": scorer.similarity(scorer.embed(whole), ref_embedding),
         "sim_chunk_min": min(sims) if sims else 0.0,
+        "sim_first": windows[0],
+        "sim_last": windows[-1],
         "first_chunk_s": timeline.first_audio_s,
         "stall_s": timeline.total_stall_s,
         "stalls": timeline.stalls,
         "rtf": sum(c["gen_seconds"] for c in chunks) / max(timeline.audio_s, 1e-6),
         "hit_max_tokens": sum(c["finish_reason"] != "eos" for c in chunks),
     }
+    return row, seam_rows(chunks, edges)
 
 
-def print_summary(rows: list[dict]) -> None:
+def write_csv(path: Path, columns: Sequence[str], rows: list[dict]) -> None:
+    # utf-8-sig so that Excel shows the Chinese text correctly.
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def print_summary(rows: list[dict], seams: list[dict]) -> None:
     by_variant = defaultdict(list)
     for row in rows:
         by_variant[row["variant"]].append(row)
-    metrics = COLUMNS[4:]
-    print(f"\n{'variant':<17}" + "".join(f"{m:>15}" for m in metrics))
+    metrics = COLUMNS[COLUMNS.index("err_all") :]
+    print(f"\nMeans over texts and {len({r['seed'] for r in rows})} seed(s)")
+    print(f"{'variant':<17}{'n':>4}" + "".join(f"{m:>15}" for m in metrics))
     for variant, group in by_variant.items():
         means = (statistics.mean(r[m] for r in group) for m in metrics)
-        print(f"{variant:<17}" + "".join(f"{v:>15.3f}" for v in means))
-    print("\nLower is better: " + ", ".join(sorted(LOWER_IS_BETTER)))
+        print(f"{variant:<17}{len(group):>4}" + "".join(f"{v:>15.3f}" for v in means))
+    print("Lower is better: " + ", ".join(sorted(LOWER_IS_BETTER)))
+
+    pauses = defaultdict(list)
+    for seam in seams:
+        pauses[seam["variant"], seam["kind"]].append(seam["pause_s"])
+    kinds = ("word", "clause", "sentence")
+    print("\nMean pause at seams in seconds (number of seams), by how the chunk before ends")
+    print(f"{'variant':<17}" + "".join(f"{kind:>16}" for kind in kinds))
+    for variant in by_variant:
+        if not any(pauses[variant, kind] for kind in kinds):
+            continue  # one chunk, no seams
+        cells = []
+        for kind in kinds:
+            values = pauses[variant, kind]
+            cells.append(f"{statistics.mean(values):.3f} ({len(values)})" if values else "-")
+        print(f"{variant:<17}" + "".join(f"{cell:>16}" for cell in cells))
 
 
 def main() -> None:
     args = parse_args()
-    run_config = json.loads((args.run / "run.json").read_text())
-    ref_audio = args.ref_audio or Path(run_config["ref_audio"])
+    for run in args.runs:
+        if not (run / "run.json").is_file():
+            raise SystemExit(f"{run} has no run.json; pass the seed folders, e.g. {run}/seed*")
+    configs = {run: json.loads((run / "run.json").read_text()) for run in args.runs}
+    ref_audio = args.ref_audio or Path(configs[args.runs[0]]["ref_audio"])
     scorer = Scorer(args.asr_model, args.device)
-    ref_embedding = scorer.embed(ref_audio)
+    ref_embedding = scorer.embed(scorer.load(ref_audio))
 
-    rows = []
-    for meta_path in sorted(args.run.glob("*/*/meta.json")):
-        row = score_variant(scorer, meta_path.parent, ref_embedding)
-        rows.append(row)
-        print(
-            f"{row['text_id']:<12} {row['variant']:<17} err {row['err_all']:.3f}  "
-            f"leak {row['leak_rate']:.2f}  sim {row['sim_all']:.3f}"
-        )
-    if not rows:
-        raise SystemExit(f"no meta.json under {args.run}")
-
-    with open(args.run / "scores.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
-    print_summary(rows)
-    print(f"\nWrote {args.run / 'scores.csv'}")
+    all_rows, all_seams = [], []
+    for run in args.runs:
+        seed = configs[run].get("seed")
+        rows, seams = [], []
+        for meta_path in sorted(run.glob("*/*/meta.json")):
+            row, variant_seams = score_variant(scorer, meta_path.parent, ref_embedding)
+            row["seed"] = seed
+            key = {k: row[k] for k in ("text_id", "lang", "variant", "seed")}
+            rows.append(row)
+            seams += [key | seam for seam in variant_seams]
+            print(
+                f"seed {seed}  {row['text_id']:<14} {row['variant']:<17} "
+                f"err {row['err_all']:.3f}  leak {row['leak_rate']:.2f}  sim {row['sim_all']:.3f}"
+            )
+        if not rows:
+            raise SystemExit(f"no meta.json under {run}")
+        write_csv(run / "scores.csv", COLUMNS, rows)
+        write_csv(run / "seams.csv", SEAM_COLUMNS, seams)
+        print(f"Wrote {run / 'scores.csv'} and {run / 'seams.csv'}")
+        all_rows += rows
+        all_seams += seams
+    print_summary(all_rows, all_seams)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,14 @@
 """Week 1: synthesize every test text in every mode with the same reference voice.
 
-Writes, per text and variant:
-  results/<run>/<text_id>/<variant>/chunk_XX.wav   each chunk decoded on its own
-  results/<run>/<text_id>/<variant>/all.wav        all chunk codes decoded together
-  results/<run>/<text_id>/<variant>/meta.json      chunks, timings, prompt sizes
-  results/<run>/<text_id>/<variant>/codes.pt       per-chunk codes, for re-decoding
+Writes, per seed, text and variant:
+  <out>/seed<N>/run.json                           settings of this seed's run
+  <out>/seed<N>/<text_id>/<variant>/chunk_XX.wav   each chunk decoded on its own
+  <out>/seed<N>/<text_id>/<variant>/all.wav        all chunk codes decoded together
+  <out>/seed<N>/<text_id>/<variant>/meta.json      chunks, timings, prompt sizes
+  <out>/seed<N>/<text_id>/<variant>/codes.pt       per-chunk codes, for re-decoding
+
+Folders that already have meta.json are skipped, so an interrupted run resumes.
+A text can set its own min_chars and max_chars in the texts file.
 """
 
 import argparse
@@ -40,9 +44,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--speaker-tag", action=argparse.BooleanOptionalAction, default=True
     )
-    parser.add_argument("--min-chars", type=int, default=12)
-    parser.add_argument("--max-chars", type=int, default=80)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--min-chars", type=int, default=12, help="unless the text sets it")
+    parser.add_argument("--max-chars", type=int, default=80, help="unless the text sets it")
+    parser.add_argument("--seeds", nargs="+", type=int, default=[42])
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--top-k", type=int)
     parser.add_argument("--top-p", type=float)
@@ -105,6 +109,19 @@ def save(out_dir: Path, engine: Drama3, item: dict, variant: str, results) -> di
     return meta
 
 
+def report(variant: str, meta: dict) -> None:
+    chunks = meta["chunks"]
+    gen = sum(c["gen_seconds"] for c in chunks)
+    audio = sum(c["audio_seconds"] for c in chunks)
+    not_eos = sum(c["finish_reason"] != "eos" for c in chunks)
+    print(
+        f"  {variant:<17} audio {audio:6.2f}s  gen {gen:6.2f}s  "
+        f"first chunk {chunks[0]['gen_seconds']:5.2f}s  "
+        f"max prompt {max(c['prompt_rows'] for c in chunks)} rows"
+        + (f"  [{not_eos} chunk(s) hit max_new_tokens]" if not_eos else "")
+    )
+
+
 def main() -> None:
     args = parse_args()
     items = [json.loads(line) for line in args.texts.read_text().splitlines() if line.strip()]
@@ -116,29 +133,32 @@ def main() -> None:
     engine = Drama3(args.checkpoint, args.device)
     refs = [engine.reference(args.ref_audio, reference_text(args.ref_audio, args.ref_text))]
     sampling = Sampling(args.temperature, args.top_k, args.top_p)
-    args.out.mkdir(parents=True, exist_ok=True)
     run_config = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
-    (args.out / "run.json").write_text(json.dumps(run_config, indent=1))
 
-    for item in items:
-        chunks = split_chunks(item["text"], args.min_chars, args.max_chars)
-        print(f"\n== {item['id']} ({item['lang']}): {len(chunks)} chunks")
-        for variant in args.variants:
-            torch.manual_seed(args.seed)
-            results = run_variant(
-                engine, variant, item["text"], chunks, refs, sampling, args.speaker_tag
+    # Seeds outermost, so the first seed is complete early.
+    for seed in args.seeds:
+        run_dir = args.out / f"seed{seed}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "run.json").write_text(json.dumps(run_config | {"seed": seed}, indent=1))
+        for item in items:
+            chunks = split_chunks(
+                item["text"],
+                item.get("min_chars", args.min_chars),
+                item.get("max_chars", args.max_chars),
             )
-            meta = save(args.out / item["id"] / variant, engine, item, variant, results)
-            gen = sum(c["gen_seconds"] for c in meta["chunks"])
-            audio = sum(c["audio_seconds"] for c in meta["chunks"])
-            not_eos = sum(c["finish_reason"] != "eos" for c in meta["chunks"])
-            print(
-                f"  {variant:<17} audio {audio:6.2f}s  gen {gen:6.2f}s  "
-                f"first chunk {meta['chunks'][0]['gen_seconds']:5.2f}s  "
-                f"max prompt {max(c['prompt_rows'] for c in meta['chunks'])} rows"
-                + (f"  [{not_eos} chunk(s) hit max_new_tokens]" if not_eos else "")
-            )
-    print(f"\nDone. Score with: python experiments/week1_score.py {args.out}")
+            print(f"\n== seed {seed}, {item['id']} ({item['lang']}): {len(chunks)} chunks")
+            for variant in args.variants:
+                out_dir = run_dir / item["id"] / variant
+                if (out_dir / "meta.json").is_file():
+                    print(f"  {variant:<17} already done, skipped")
+                    continue
+                torch.manual_seed(seed)
+                results = run_variant(
+                    engine, variant, item["text"], chunks, refs, sampling, args.speaker_tag
+                )
+                report(variant, save(out_dir, engine, item, variant, results))
+    runs = " ".join(str(args.out / f"seed{seed}") for seed in args.seeds)
+    print(f"\nDone. Score with: python experiments/week1_score.py {runs}")
 
 
 if __name__ == "__main__":

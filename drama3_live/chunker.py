@@ -6,6 +6,7 @@ split. A short tail is merged into the previous chunk.
 """
 
 import re
+import unicodedata
 
 SENTENCE_ENDS = frozenset(".!?;。！？；…")
 CLAUSE_MARKS = frozenset(",:，：、")
@@ -36,6 +37,10 @@ def _is_sentence_end(atom: str, next_atom: str | None) -> bool:
     return atom != "." or next_atom is None or next_atom.isspace()
 
 
+def _is_punctuation(atom: str | None) -> bool:
+    return atom is not None and len(atom) == 1 and unicodedata.category(atom)[0] == "P"
+
+
 def split_chunks(text: str, min_chars: int = 12, max_chars: int = 80) -> list[str]:
     if min_chars < 1 or max_chars < min_chars:
         raise ValueError("need 1 <= min_chars <= max_chars")
@@ -50,8 +55,9 @@ def split_chunks(text: str, min_chars: int = 12, max_chars: int = 80) -> list[st
         elif size >= max_chars and (atom in CLAUSE_MARKS or atom.isspace()):
             cut = True
         else:
-            # Text without marks or spaces (long Chinese runs) still gets cut.
-            cut = size >= 2 * max_chars
+            # Text without marks or spaces (long Chinese runs) still gets cut, but
+            # never right before a punctuation mark.
+            cut = size >= 2 * max_chars and not _is_punctuation(next_atom)
         if cut:
             chunks.append(buffer.strip())
             buffer = ""

@@ -43,6 +43,12 @@ def test_text_without_breaks_is_cut_at_twice_max_chars():
     assert [len(c) for c in chunks] == [20, 20, 10]
 
 
+def test_hard_cut_keeps_the_period_with_its_sentence():
+    text = "那天晚上下着小雨，老陈收摊比平时晚了一些。老陈把最后几个包子装进袋子里，"
+    chunks = split_chunks(text, min_chars=6, max_chars=10)
+    assert chunks[0] == "那天晚上下着小雨，老陈收摊比平时晚了一些。"
+
+
 def test_short_tail_merges_into_previous():
     chunks = split_chunks("This is the first full sentence. Ok.", min_chars=5)
     assert chunks == ["This is the first full sentence. Ok."]

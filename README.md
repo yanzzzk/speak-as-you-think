@@ -34,11 +34,44 @@ four modes with the same reference voice:
 - `--speaker-tag / --no-speaker-tag`: prefix `<|speaker:0|>` to user turns or not
 
 Scored per text and mode: WER/CER of the whole answer, per-chunk errors, **lookahead
-leakage** (next chunk's words spoken early), speaker similarity to the reference,
-and a playback timeline (time to first chunk, stalls).
+leakage** (next chunk's words spoken early), speaker similarity to the reference
+(whole answer, worst chunk, first vs last few seconds), the **pause at each seam**
+by how the chunk before it ends (mid-phrase, comma or sentence end), and a playback
+timeline (time to first chunk, stalls).
 
 Week 1 timing is per chunk, not per frame: `generate_drama3` returns a chunk's frames
 all at once. Frame-level time-to-first-audio comes with the engine work in week 2.
+
+### Round 1 results
+
+`data/week1_texts.jsonl` (8 short texts), default chunk sizes, all five variants,
+one run each, on 3× A40:
+
+- **The format works.** No lookahead was spoken early (0%), no chunk failed or ran
+  to the token limit, and WER/CER and predicted naturalness (UTMOS) matched the
+  whole-text ceiling: 3.52 for `streaming-round` vs 3.50 for `full`.
+- **It beat independent chunks** (UTMOS 3.30; streaming was higher on 7 of 8 texts)
+  **but only tied fish-speech's history** (3.43), which kept the voice most
+  consistent from chunk to chunk (0.815 vs 0.779).
+- `round` stayed closer to the reference voice than `system` (0.700 vs 0.668), so it
+  is the streaming variant from now on.
+- Why no clear winner: 18 of 21 seams fell at sentence ends, where independent
+  chunks already sound fine. Lookahead should matter when a chunk ends mid-sentence.
+- Timing from this run says nothing about the model: A40 has no FP8, so it ran in
+  bf16 across three cards, and fish-speech turns off its CUDA graphs when a model
+  spans several GPUs.
+
+### Round 2 (now)
+
+`data/round2_texts.jsonl`: six longer texts (4 English, 2 Chinese, 10-19 chunks
+each), cut into small chunks (about 30 characters in English, 10 in Chinese) so
+that most seams fall mid-sentence: 46 mid-phrase, 16 at a comma and 20 at a
+sentence end as the control. Three modes (`independent`, `fish_history`,
+`streaming-round`), three seeds each.
+
+The new number to watch is the pause at each seam. Natural speech has almost no
+pause in the middle of a phrase. If lookahead works, `streaming-round` should pause
+much less than `independent` at mid-phrase seams and about the same at sentence ends.
 
 ## Running the experiment (GPU machine)
 
@@ -46,12 +79,14 @@ all at once. Frame-level time-to-first-audio comes with the engine work in week 
 
 - Linux with an NVIDIA GPU that has **48 GB+ and SM89+** (L40, L40S, RTX 6000 Ada, H100).
   fish-speech loads only the FP8 Drama 3 checkpoint natively, and FP8 experts need
-  SM89+. On older cards (A6000, A100) the experts are dequantized to bf16 (~70 GB).
+  SM89+. Older cards (A40, A6000, A100) also work across several GPUs, e.g.
+  `--device cuda:0,cuda:1,cuda:2`: quality results are valid, but the model runs in
+  bf16 (~70 GB) without CUDA graphs, so it is much slower.
   Avoid RTX 50-series cards (near-silent output reported on sm_120).
 - About 100 GB of disk for the weights and results.
 - Python 3.12 in a fresh environment, as fish-speech recommends:
   `conda create -n drama3 python=3.12 && conda activate drama3`
-- System audio packages: `sudo apt install portaudio19-dev libsox-dev ffmpeg`
+- System audio packages: `sudo apt install portaudio19-dev libsox-dev ffmpeg zip`
 - A Hugging Face login if the download asks for one: `hf auth login`, and accept the
   Drama 3 license on its model page.
 - The reference voice, which is **not in this repo**. Get `voice.wav` (10-20 s) and
@@ -71,42 +106,51 @@ weights. Set `CUDA_TAG=cu126` or `cu128` first if your CUDA is older than 12.9.
 
 ### 2. Smoke test
 
-One text in two modes, to catch problems before the full run:
+One text in two modes, to catch problems before a long run:
 
 ```bash
 python experiments/week1_run.py \
     --checkpoint ../fish-speech/checkpoints/drama-3 \
     --ref-audio data/ref/voice.wav \
     --out results/smoke \
-    --only en_story --variants full streaming-system \
+    --only en_story --variants full streaming-round \
     2>&1 | tee smoke.log
 ```
 
-### 3. Full run and scoring
+### 3. Round 2
+
+One command runs all of round 2, scores it and zips the results:
 
 ```bash
-python experiments/week1_run.py \
-    --checkpoint ../fish-speech/checkpoints/drama-3 \
-    --ref-audio data/ref/voice.wav \
-    --out results/week1 \
-    2>&1 | tee run.log
-
-python experiments/week1_score.py results/week1 2>&1 | tee score.log
+git pull
+bash scripts/run_round2.sh cuda:0
 ```
+
+On older cards, give it several GPUs: `bash scripts/run_round2.sh cuda:0,cuda:1,cuda:2`.
+
+Rough time, estimated from round 1: 2.5-3 hours on 3× A40, much less on one L40S or
+H100. Seeds run one after another, so seed 1 is complete after about a third of
+that. If time is short, run seed 1 alone first and send that:
+
+```bash
+SEEDS=1 bash scripts/run_round2.sh cuda:0
+```
+
+The run can be stopped and restarted at any time: finished work is skipped. To redo
+something, delete its folder under `results/round2/`.
+
+If you still have your own scoring scripts from round 1 (UTMOS, VAD, listening
+pairs), please run them on each `results/round2/seedN` folder too.
 
 ### 4. Send back the results
 
-`results/` is git-ignored, so zip it and send it directly (Drive, WeTransfer, etc.):
+Send `round2_results.zip` (a few hundred MB) by Drive, WeTransfer, etc. It holds
+the audio, `scores.csv` and `seams.csv` for each seed, and both logs. In
+`seams.csv`, `time_s` is where each seam falls in that text's `all.wav`, for
+listening.
 
-```bash
-zip -r week1_results.zip results/week1 *.log
-```
-
-The most important file is `results/week1/scores.csv`. Each
-`results/week1/<text>/<variant>/all.wav` is the full audio for listening.
-
-**If anything fails**, there is no need to debug it. Send the matching `.log` file;
-after a fix, `git pull` and rerun that step.
+**If anything fails**, there is no need to debug it. Send `round2_run.log` or
+`round2_score.log`; after a fix, `git pull` and rerun the same command.
 
 ## Layout
 
@@ -117,9 +161,11 @@ drama3_live/
   encode.py     segments -> Drama 3 prompt rows
   modes.py      the four synthesis modes (needs fish-speech + GPU)
   scoring.py    text normalization, WER/CER, lookahead leakage (no torch)
+  seams.py      seam kinds and pause lengths (no torch)
   timeline.py   playback timeline and stall metrics (no torch)
-experiments/    week-1 run and scoring scripts
-data/           test texts; reference voice goes in data/ref/ (git-ignored)
+experiments/    run and scoring scripts
+scripts/        GPU setup and the one-command round 2
+data/           test texts of rounds 1 and 2; the reference voice goes in data/ref/ (git-ignored)
 tests/          pytest, runs on a laptop without a GPU
 ```
 
