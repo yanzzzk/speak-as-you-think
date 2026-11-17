@@ -167,16 +167,19 @@ def run_streaming(
     sampling: Sampling,
     ref_style: RefStyle = "system",
     speaker_tag: bool = True,
+    max_history: int | None = None,
 ) -> list[ChunkResult]:
     """Figure 10: chunk + <|endofturn|> + next chunk, earlier rounds in context.
 
+    max_history keeps only that many recent rounds; the reference always stays.
     When the prompt outgrows the cache, the oldest rounds are dropped first.
     """
     history: list[Round] = []
     results = []
     for index, chunk in enumerate(chunks):
         lookahead = chunks[index + 1] if index + 1 < len(chunks) else ""
-        for start in range(len(history) + 1):
+        first = 0 if max_history is None else max(0, len(history) - max_history)
+        for start in range(first, len(history) + 1):
             segments = streaming_prompt(
                 chunk, lookahead, history[start:], refs, ref_style, speaker_tag
             )

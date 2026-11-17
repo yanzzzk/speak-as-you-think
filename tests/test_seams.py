@@ -1,14 +1,4 @@
-import numpy as np
-import pytest
-
-from drama3_live.seams import edge_silence, seam_kind, seam_rows
-
-SR = 16000
-
-
-def tone(seconds: float, amplitude: float = 0.5) -> np.ndarray:
-    t = np.arange(round(seconds * SR)) / SR
-    return amplitude * np.sin(2 * np.pi * 220 * t)
+from drama3_live.seams import edge_nonspeech, seam_kind, seam_rows
 
 
 def test_seam_kinds():
@@ -20,25 +10,15 @@ def test_seam_kinds():
     assert seam_kind('She said "thank you."') == "sentence"
 
 
-def test_edge_silence_measures_both_ends():
-    clip = np.concatenate([np.zeros(round(0.2 * SR)), tone(0.5), np.zeros(round(0.3 * SR))])
-    lead, trail = edge_silence(clip, SR)
-    assert lead == pytest.approx(0.2, abs=0.01)
-    assert trail == pytest.approx(0.3, abs=0.01)
+def test_edge_nonspeech_measures_both_ends():
+    assert edge_nonspeech([(3200, 8000), (9600, 12800)], 16000, 16000) == (0.2, 0.2)
 
 
-def test_quiet_noise_counts_as_silence():
-    noise = 0.0005 * np.random.default_rng(0).standard_normal(round(0.2 * SR))  # ~57 dB down
-    lead, trail = edge_silence(np.concatenate([noise, tone(0.5), noise]), SR)
-    assert lead == pytest.approx(0.2, abs=0.01)
-    assert trail == pytest.approx(0.2, abs=0.01)
+def test_clip_without_speech_is_nonspeech_at_both_ends():
+    assert edge_nonspeech([], 16000, 16000) == (1.0, 1.0)
 
 
-def test_silent_clip_is_silent_at_both_ends():
-    assert edge_silence(np.zeros(SR), SR) == (1.0, 1.0)
-
-
-def test_seam_pause_is_trailing_plus_leading_silence():
+def test_seam_pause_is_trailing_plus_leading_nonspeech():
     chunks = [
         {"text": "It was late,", "audio_seconds": 1.0},
         {"text": "and the hall", "audio_seconds": 2.0},

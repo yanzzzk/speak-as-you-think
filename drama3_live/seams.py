@@ -6,8 +6,6 @@ should remove. Sentence ends are the control: a pause there is natural.
 
 from collections.abc import Sequence
 
-import numpy as np
-
 from drama3_live.chunker import CLAUSE_MARKS, SENTENCE_ENDS
 
 CLOSING_MARKS = "\"'”’)」』】"
@@ -21,34 +19,25 @@ def seam_kind(chunk: str) -> str:
     return "clause" if last in CLAUSE_MARKS else "word"
 
 
-def edge_silence(
-    samples: np.ndarray, sample_rate: int, threshold_db: float = -40.0, frame_s: float = 0.01
+def edge_nonspeech(
+    speech: Sequence[tuple[int, int]], length: int, sample_rate: int
 ) -> tuple[float, float]:
-    """Seconds of silence at the start and at the end of a clip.
+    """Seconds of non-speech before the first and after the last speech segment.
 
-    A frame is silent when its RMS is more than threshold_db below the loudest
-    frame, so breaths count as sound. An all-silent clip is silent at both ends.
+    speech holds (start, end) sample indices from a voice activity detector. A clip
+    without speech is non-speech at both ends. This counts non-speech, not quiet:
+    generated audio copies the reference's room noise, so its pauses are not silent.
     """
-    frame = max(1, round(frame_s * sample_rate))
-    count = len(samples) // frame
-    duration = len(samples) / sample_rate
-    if count == 0:
-        return duration, duration
-    frames = np.asarray(samples[: count * frame], dtype=np.float64).reshape(count, frame)
-    rms = np.sqrt(np.mean(frames**2, axis=1))
-    loud = rms > rms.max() * 10 ** (threshold_db / 20)
-    if not loud.any():
-        return duration, duration
-    first = int(np.argmax(loud))
-    end = count - int(np.argmax(loud[::-1]))  # one past the last loud frame
-    return first * frame / sample_rate, duration - end * frame / sample_rate
+    if not speech:
+        return length / sample_rate, length / sample_rate
+    return speech[0][0] / sample_rate, (length - speech[-1][1]) / sample_rate
 
 
 def seam_rows(chunks: Sequence[dict], edges: Sequence[tuple[float, float]]) -> list[dict]:
     """One row per seam between consecutive chunks of a meta.json.
 
-    edges holds each chunk's (leading, trailing) silence. time_s is where the seam
-    falls in all.wav, to find it when listening.
+    edges holds each chunk's (leading, trailing) non-speech. time_s is where the
+    seam falls in all.wav, to find it when listening.
     """
     rows, time = [], 0.0
     for index in range(len(chunks) - 1):

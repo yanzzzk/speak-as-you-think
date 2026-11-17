@@ -29,7 +29,16 @@ from drama3_live.modes import (
     run_streaming,
 )
 
-VARIANTS = ("full", "independent", "fish_history", "streaming-system", "streaming-round")
+VARIANTS = (
+    "full",
+    "independent",
+    "fish_history",
+    "streaming-system",
+    "streaming-round",
+    # Round 3: the same, remembering only the last 1 or 4 rounds besides the reference.
+    "streaming-round-w1",
+    "streaming-round-w4",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,8 +80,10 @@ def run_variant(engine, variant, text, chunks, refs, sampling, speaker_tag):
         return run_independent(engine, chunks, refs, sampling)
     if variant == "fish_history":
         return run_fish_history(engine, chunks, refs, sampling)
-    ref_style = variant.removeprefix("streaming-")
-    return run_streaming(engine, chunks, refs, sampling, ref_style, speaker_tag)
+    # "streaming-round-w4" -> ref_style "round", window 4
+    ref_style, _, window = variant.removeprefix("streaming-").partition("-w")
+    max_history = int(window) if window else None
+    return run_streaming(engine, chunks, refs, sampling, ref_style, speaker_tag, max_history)
 
 
 def save(out_dir: Path, engine: Drama3, item: dict, variant: str, results) -> dict:
@@ -115,7 +126,7 @@ def report(variant: str, meta: dict) -> None:
     audio = sum(c["audio_seconds"] for c in chunks)
     not_eos = sum(c["finish_reason"] != "eos" for c in chunks)
     print(
-        f"  {variant:<17} audio {audio:6.2f}s  gen {gen:6.2f}s  "
+        f"  {variant:<20} audio {audio:6.2f}s  gen {gen:6.2f}s  "
         f"first chunk {chunks[0]['gen_seconds']:5.2f}s  "
         f"max prompt {max(c['prompt_rows'] for c in chunks)} rows"
         + (f"  [{not_eos} chunk(s) hit max_new_tokens]" if not_eos else "")
@@ -150,7 +161,7 @@ def main() -> None:
             for variant in args.variants:
                 out_dir = run_dir / item["id"] / variant
                 if (out_dir / "meta.json").is_file():
-                    print(f"  {variant:<17} already done, skipped")
+                    print(f"  {variant:<20} already done, skipped")
                     continue
                 torch.manual_seed(seed)
                 results = run_variant(

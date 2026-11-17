@@ -3,6 +3,7 @@
 Writes, in each run directory (one seed folder of week1_run.py):
   scores.csv   one row per text and variant
   seams.csv    one row per seam between chunks: kind of cut and pause length
+               (non-speech found by Silero VAD at the chunk edges)
 and prints the means per variant over all runs given. Error rates are WER for
 English and CER for Chinese.
 """
@@ -20,7 +21,7 @@ import torch
 import torchaudio
 
 from drama3_live.scoring import error_rate, leaked
-from drama3_live.seams import edge_silence, seam_rows
+from drama3_live.seams import edge_nonspeech, seam_rows
 from drama3_live.timeline import playback_timeline
 
 COLUMNS = (
@@ -61,12 +62,18 @@ def parse_args() -> argparse.Namespace:
 class Scorer:
     def __init__(self, asr_model: str, device: str) -> None:
         from faster_whisper import WhisperModel
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
         from speechbrain.inference.speaker import EncoderClassifier
 
         compute_type = "float16" if device == "cuda" else "int8"
         self.asr = WhisperModel(asr_model, device=device, compute_type=compute_type)
         self.speaker = EncoderClassifier.from_hparams(
             "speechbrain/spkrec-ecapa-voxceleb", run_opts={"device": device}
+        )
+        # Silero VAD as bundled with faster-whisper, with the settings of round 2.
+        self.detect_speech = get_speech_timestamps
+        self.vad_options = VadOptions(
+            threshold=0.5, min_speech_duration_ms=250, min_silence_duration_ms=100, speech_pad_ms=30
         )
 
     def transcribe(self, path: Path, lang: str) -> str:
@@ -82,6 +89,12 @@ class Scorer:
     @torch.inference_mode()
     def embed(self, wav: torch.Tensor) -> torch.Tensor:
         return self.speaker.encode_batch(wav).flatten()
+
+    def nonspeech_edges(self, wav: torch.Tensor) -> tuple[float, float]:
+        """Seconds of non-speech before the first and after the last speech."""
+        samples = wav[0].numpy()
+        speech = self.detect_speech(samples, self.vad_options)
+        return edge_nonspeech([(s["start"], s["end"]) for s in speech], len(samples), SAMPLE_RATE)
 
     def similarity(self, a: torch.Tensor, b: torch.Tensor) -> float:
         return torch.nn.functional.cosine_similarity(a, b, dim=0).item()
@@ -111,7 +124,7 @@ def score_variant(
             leaks.append(leaked(chunk["text"], chunk["lookahead"], transcript, lang))
         wav = scorer.load(path)
         sims.append(scorer.similarity(scorer.embed(wav), ref_embedding))
-        edges.append(edge_silence(wav[0].numpy(), SAMPLE_RATE))
+        edges.append(scorer.nonspeech_edges(wav))
 
     all_wav = folder / "all.wav"
     whole = scorer.load(all_wav)
@@ -154,18 +167,18 @@ def print_summary(rows: list[dict], seams: list[dict]) -> None:
         by_variant[row["variant"]].append(row)
     metrics = COLUMNS[COLUMNS.index("err_all") :]
     print(f"\nMeans over texts and {len({r['seed'] for r in rows})} seed(s)")
-    print(f"{'variant':<17}{'n':>4}" + "".join(f"{m:>15}" for m in metrics))
+    print(f"{'variant':<20}{'n':>4}" + "".join(f"{m:>15}" for m in metrics))
     for variant, group in by_variant.items():
         means = (statistics.mean(r[m] for r in group) for m in metrics)
-        print(f"{variant:<17}{len(group):>4}" + "".join(f"{v:>15.3f}" for v in means))
+        print(f"{variant:<20}{len(group):>4}" + "".join(f"{v:>15.3f}" for v in means))
     print("Lower is better: " + ", ".join(sorted(LOWER_IS_BETTER)))
 
     pauses = defaultdict(list)
     for seam in seams:
         pauses[seam["variant"], seam["kind"]].append(seam["pause_s"])
     kinds = ("word", "clause", "sentence")
-    print("\nMean pause at seams in seconds (number of seams), by how the chunk before ends")
-    print(f"{'variant':<17}" + "".join(f"{kind:>16}" for kind in kinds))
+    print("\nMean non-speech at seams in seconds (number of seams), by how the chunk before ends")
+    print(f"{'variant':<20}" + "".join(f"{kind:>16}" for kind in kinds))
     for variant in by_variant:
         if not any(pauses[variant, kind] for kind in kinds):
             continue  # one chunk, no seams
@@ -173,7 +186,7 @@ def print_summary(rows: list[dict], seams: list[dict]) -> None:
         for kind in kinds:
             values = pauses[variant, kind]
             cells.append(f"{statistics.mean(values):.3f} ({len(values)})" if values else "-")
-        print(f"{variant:<17}" + "".join(f"{cell:>16}" for cell in cells))
+        print(f"{variant:<20}" + "".join(f"{cell:>16}" for cell in cells))
 
 
 def main() -> None:
@@ -197,7 +210,7 @@ def main() -> None:
             rows.append(row)
             seams += [key | seam for seam in variant_seams]
             print(
-                f"seed {seed}  {row['text_id']:<14} {row['variant']:<17} "
+                f"seed {seed}  {row['text_id']:<14} {row['variant']:<20} "
                 f"err {row['err_all']:.3f}  leak {row['leak_rate']:.2f}  sim {row['sim_all']:.3f}"
             )
         if not rows:

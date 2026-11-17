@@ -61,17 +61,41 @@ one run each, on 3× A40:
   bf16 across three cards, and fish-speech turns off its CUDA graphs when a model
   spans several GPUs.
 
-### Round 2 (now)
+### Round 2 results
 
 `data/round2_texts.jsonl`: six longer texts (4 English, 2 Chinese, 10-19 chunks
 each), cut into small chunks (about 30 characters in English, 10 in Chinese) so
 that most seams fall mid-sentence: 46 mid-phrase, 16 at a comma and 20 at a
-sentence end as the control. Three modes (`independent`, `fish_history`,
-`streaming-round`), three seeds each.
+sentence end as the control. Three modes, three seeds each, on 3× A40 and 3× A100.
 
-The new number to watch is the pause at each seam. Natural speech has almost no
-pause in the middle of a phrase. If lookahead works, `streaming-round` should pause
-much less than `independent` at mid-phrase seams and about the same at sentence ends.
+| Non-speech at the seam (Silero VAD, mean) | `independent` | `fish_history` | `streaming-round` |
+|---|---|---|---|
+| Mid-phrase (English, 138 seams per mode) | 0.72 s | 0.49 s | **0.21 s** |
+| At a comma (English) | 0.69 s | 0.66 s | 0.52 s |
+| At a sentence end (English) | 0.78 s | 0.66 s | 0.87 s |
+
+- **Lookahead works where it should.** `streaming-round` hardly pauses inside a
+  phrase, pauses a little at commas and most at sentence ends, like natural speech;
+  `independent` pauses the same everywhere. Seam by seam, streaming paused less than
+  `independent` at 153 of 186 mid-sentence seams.
+- No lookahead was spoken early, WER stayed under 2% for every mode, and predicted
+  naturalness (UTMOS) tied.
+- `independent` once ran to the token limit: 27 s of silence after the fragment
+  "in time. The doors slid open with". Streaming never did.
+- **New problem: the streaming voice drifts.** Its similarity to the reference fell
+  from 0.685 in the first 6 s to 0.591 in the last 6 s (`independent`: 0.711 to
+  0.687), and it was below `independent` on all 18 text-seed pairs. Background noise
+  stayed flat, so this is the voice, not the noise.
+- The round-2 energy pause (silence = 40 dB below the loudest frame) was wrong: the
+  reference's room noise sits about 40 dB down and the model copies it, so pauses
+  are not silent. Pauses are now measured with Silero VAD.
+
+### Round 3 (now)
+
+Streaming that remembers only the reference plus the last 1 or 4 rounds
+(`streaming-round-w1`, `streaming-round-w4`), to keep the short mid-phrase pauses
+without the drift. Same texts and seeds as round 2, so the round-2 runs are reused:
+only the two new variants are generated, then every variant is re-scored.
 
 ## Running the experiment (GPU machine)
 
@@ -117,40 +141,33 @@ python experiments/week1_run.py \
     2>&1 | tee smoke.log
 ```
 
-### 3. Round 2
+### 3. Round 3
 
-One command runs all of round 2, scores it and zips the results:
+Run it in the same folder as round 2. It adds the two new variants next to the
+round-2 results in `results/round2/seedN/`, re-scores every variant and zips what
+is new:
 
 ```bash
 git pull
-bash scripts/run_round2.sh cuda:0
+bash scripts/run_round3.sh cuda:0,cuda:1,cuda:2
 ```
 
-On older cards, give it several GPUs: `bash scripts/run_round2.sh cuda:0,cuda:1,cuda:2`.
+If seed 3 of round 2 is still in `results/round2_parallel/seed3`, move it to
+`results/round2/seed3` first, or point the script at your round-2 folder with
+`OUT=...`. Rough time on 3× A40: about 2 hours, since the prompts stay short. The
+run can be stopped and restarted at any time: finished work is skipped.
 
-Rough time, estimated from round 1: 2.5-3 hours on 3× A40, much less on one L40S or
-H100. Seeds run one after another, so seed 1 is complete after about a third of
-that. If time is short, run seed 1 alone first and send that:
-
-```bash
-SEEDS=1 bash scripts/run_round2.sh cuda:0
-```
-
-The run can be stopped and restarted at any time: finished work is skipped. To redo
-something, delete its folder under `results/round2/`.
-
-If you still have your own scoring scripts from round 1 (UTMOS, VAD, listening
-pairs), please run them on each `results/round2/seedN` folder too.
+Round 2 was `bash scripts/run_round2.sh`, with the same options.
 
 ### 4. Send back the results
 
-Send `round2_results.zip` (a few hundred MB) by Drive, WeTransfer, etc. It holds
-the audio, `scores.csv` and `seams.csv` for each seed, and both logs. In
+Send `round3_results.zip` (about 250 MB) by Drive, WeTransfer, etc. It holds the
+new audio, `scores.csv` and `seams.csv` for each seed, and both logs. In
 `seams.csv`, `time_s` is where each seam falls in that text's `all.wav`, for
 listening.
 
-**If anything fails**, there is no need to debug it. Send `round2_run.log` or
-`round2_score.log`; after a fix, `git pull` and rerun the same command.
+**If anything fails**, there is no need to debug it. Send `round3_run.log` or
+`round3_score.log`; after a fix, `git pull` and rerun the same command.
 
 ## Layout
 
@@ -164,7 +181,7 @@ drama3_live/
   seams.py      seam kinds and pause lengths (no torch)
   timeline.py   playback timeline and stall metrics (no torch)
 experiments/    run and scoring scripts
-scripts/        GPU setup and the one-command round 2
+scripts/        GPU setup and the one-command runs of rounds 2 and 3
 data/           test texts of rounds 1 and 2; the reference voice goes in data/ref/ (git-ignored)
 tests/          pytest, runs on a laptop without a GPU
 ```
