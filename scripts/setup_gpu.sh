@@ -17,12 +17,15 @@ if awk "BEGIN {exit !($cap < 8.9)}"; then
 fi
 
 echo "== fish-speech"
+# Pinned: later fish-speech commits move the package this harness imports.
+FISH_COMMIT="${FISH_COMMIT:-0f8a12e8a651062fdee9c33a894bdccd3a8513f1}"
 if [ ! -d "$FISH" ]; then
     git clone https://github.com/fishaudio/fish-speech.git "$FISH"
+    git -C "$FISH" checkout -q "$FISH_COMMIT"
 fi
 pip install --extra-index-url "https://download.pytorch.org/whl/$CUDA_TAG" -e "$FISH[$CUDA_TAG]"
 
-echo "== drama3-live"
+echo "== speak-as-you-think"
 pip install -r "$ROOT/requirements.txt"
 pip install -e "$ROOT"
 

@@ -9,7 +9,7 @@ from collections.abc import Sequence
 
 import torch
 
-from drama3_live.prompts import END_OF_TURN, Segment
+from speak_as_you_think.prompts import END_OF_TURN, Segment
 
 
 def check_special_tokens(tokenizer) -> None:

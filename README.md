@@ -1,201 +1,145 @@
-# drama3-live
+# Speak as you think
 
-Speak-as-you-think streaming speech for realtime voice agents, built on
-[Fish Audio Drama 3](https://huggingface.co/fishaudio/drama-3).
+Streaming-text speech for realtime voice agents. **Built with Fish Audio**
+([Drama 3](https://huggingface.co/fishaudio/drama-3)).
 
-Drama 3 was trained on a **streaming-text interleave format**: each round gives the
-model the text chunk to speak, `<|endofturn|>`, and the *next* chunk as lookahead,
-while earlier audio stays in context
-([technical report](https://arxiv.org/html/2610.18010v2), Appendix A, Figure 10).
-No open serving engine exposes this mode yet: fish-speech and SGLang-Omni synthesize
-each chunk as an independent turn. This project makes the mode usable for voice
-agents and measures what it buys.
+An LLM writes its reply a few words at a time. To start speaking early, a voice
+agent has to cut that text before the sentence is finished, and a chunk that ends
+mid-phrase is then followed by a gap before the next one.
 
-## Status: week 1, format validation
+Drama 3 was trained on a format made for this. Each round gives the model the chunk
+to speak, `<|endofturn|>`, and the *next* chunk as lookahead, while earlier rounds
+stay in context ([tech report](https://arxiv.org/html/2610.18010v2), Appendix A,
+Figure 10). As of November 2026 none of the open engines I checked (fish-speech,
+SGLang-Omni, vLLM-Omni) builds these rounds. This repo measures what the mode
+changes and is building the session engine for it.
 
-Question for week 1: **does the streaming format work on the open weights, and is
-it clearly better than what engines do today?**
+**Result so far:** at cuts inside a phrase, the streaming-text format cuts the
+median gap from **0.45 s** to **0.14 s**. Keeping the voice stable costs part of
+that: with one round of memory the gap is 0.25 s. On one L40 the model decodes at
+about twice real time.
 
-Each test text is split into the chunks an LLM would stream, then synthesized in
-four modes with the same reference voice:
+**[Results page with audio](https://yanzzzk.github.io/speak-as-you-think/)** ·
+[How to run it](docs/RUNNING.md)
 
-| Mode | What it does | Why |
-|---|---|---|
-| `full` | Whole text in one pass | Quality ceiling (not streamable) |
-| `independent` | Each chunk on its own, reference only | What a sentence-per-request cascade does today |
-| `fish_history` | Each chunk with fish-speech's history (first + latest chunk), no lookahead | Strongest existing baseline (fish-speech `generate_long_drama3`) |
-| `streaming` | Figure 10 format: chunk + `<\|endofturn\|>` + next chunk, all earlier rounds in context | This project |
+| Median non-speech at the cut | Independent chunks | fish-speech history | Streaming, last round | Streaming, all rounds |
+|---|---|---|---|---|
+| Mid-phrase, English (138 seams per mode) | 0.45 s | 0.41 s | 0.25 s | **0.14 s** |
+| At a comma, English (15) | 0.72 s | 0.75 s | 0.70 s | 0.64 s |
+| At a sentence end, English (39) | 0.77 s | 0.68 s | 0.98 s | 0.86 s |
+| Voice similarity to the reference, whole clip | 0.760 | 0.706 | 0.752 | 0.687 |
 
-`streaming` has two open design questions, exposed as flags:
+Same text, same cuts, same voice in every mode; three seeds; pauses measured with
+Silero VAD on each chunk's audio; speaker similarity with ECAPA.
 
-- `--ref-style system`: reference blocks in the system message, as fish-speech does
-- `--ref-style round`: the reference becomes round 0 of the conversation, so the
-  model "continues" in that voice
-- `--speaker-tag / --no-speaker-tag`: prefix `<|speaker:0|>` to user turns or not
+## What is compared
 
-Scored per text and mode: WER/CER of the whole answer, per-chunk errors, **lookahead
-leakage** (next chunk's words spoken early), speaker similarity to the reference
-(whole answer, worst chunk, first vs last few seconds), the **pause at each seam**
-by how the chunk before it ends (mid-phrase, comma or sentence end), and a playback
-timeline (time to first chunk, stalls).
+| Mode | What it does |
+|---|---|
+| Independent chunks (`independent`) | Each chunk synthesized alone with the reference voice: a chunk-per-request cascade |
+| fish-speech history (`fish_history`) | fish-speech's long-form context rule on the same cuts: the first and the latest chunk, no lookahead |
+| Streaming, all rounds (`streaming-round`) | Figure 10 format: chunk + `<\|endofturn\|>` + next chunk, every earlier round in context, the reference as round 0 |
+| Streaming, last round (`streaming-round-w1`) | The same, keeping only the latest round besides the reference (`-w4`: the last four) |
+| Whole text (`full`) | One pass over the full text: the quality ceiling, not streamable (round 1 only) |
 
-Week 1 timing is per chunk, not per frame: `generate_drama3` returns a chunk's frames
-all at once. Frame-level time-to-first-audio comes with the engine work in week 2.
+## Results
 
-### Round 1 results
+**Round 1** (8 short texts, cut mostly at sentence ends). The format works on the
+open weights: no lookahead text was spoken early, and word errors and predicted
+naturalness matched whole-text synthesis (UTMOS 3.52 vs 3.50). Cut at sentence
+ends, the pause at the cut was about the same in every mode (mean 0.62 to 0.73 s),
+so round 2 moved the cuts inside sentences.
 
-`data/week1_texts.jsonl` (8 short texts), default chunk sizes, all five variants,
-one run each, on 3× A40:
+**Round 2** (6 longer texts, 4 English and 2 Chinese, chunks of about 30 characters
+in English and 14 in Chinese; 3 seeds; 264 chunks per mode).
 
-- **The format works.** No lookahead was spoken early (0%), no chunk failed or ran
-  to the token limit, and WER/CER and predicted naturalness (UTMOS) matched the
-  whole-text ceiling: 3.52 for `streaming-round` vs 3.50 for `full`.
-- **It beat independent chunks** (UTMOS 3.30; streaming was higher on 7 of 8 texts)
-  **but only tied fish-speech's history** (3.43), which kept the voice most
-  consistent from chunk to chunk (0.815 vs 0.779).
-- `round` stayed closer to the reference voice than `system` (0.700 vs 0.668), so it
-  is the streaming variant from now on.
-- Why no clear winner: 18 of 21 seams fell at sentence ends, where independent
-  chunks already sound fine. Lookahead should matter when a chunk ends mid-sentence.
-- Timing from this run says nothing about the model: A40 has no FP8, so it ran in
-  bf16 across three cards, and fish-speech turns off its CUDA graphs when a model
-  spans several GPUs.
+- **With every round in memory, the gap inside a phrase shrinks to a third.**
+  Streaming paused less than independent chunks at 117 of 138 English mid-phrase
+  seams. Its pauses grow with the punctuation (0.14 s mid-phrase, 0.64 s at a comma,
+  0.86 s at a sentence end).
+- **Medians, because one chunk failed.** An independent chunk never stopped after
+  the fragment "in time. The doors slid open with": 27 s of non-speech up to the
+  token limit. The mid-phrase means are 0.72 / 0.49 / 0.21 s with it (independent /
+  fish-speech history / streaming, all rounds), and 0.53 / 0.48 / 0.21 s when that
+  text's seed-1 run is left out in every mode.
+- **The first seam of a reply gets no short pause.** At the first cut of a text,
+  streaming left a median 0.72 s (9 seams), against 0.13 s from the second cut on.
+  Against independent chunks the first cut is mixed: a higher median (0.72 s vs
+  0.48 s), yet shorter at 6 of the 9.
+- **No lookahead was spoken early** (0% of chunks, by transcribing each chunk), and
+  predicted naturalness tied (UTMOS 3.33 / 3.37 / 3.42).
+- **The voice drifts.** With all rounds in memory, speaker similarity to the
+  reference fell from 0.685 in the first 6 s to 0.591 in the last 6 s of a clip
+  (independent chunks: 0.711 to 0.687).
+- The Chinese texts were cut at punctuation only, so the mid-phrase effect is tested
+  in English. At Chinese commas the modes are close.
 
-### Round 2 results
+**Round 3** (the same texts and seeds, streaming with a short memory).
 
-`data/round2_texts.jsonl`: six longer texts (4 English, 2 Chinese, 10-19 chunks
-each), cut into small chunks (about 30 characters in English, 10 in Chinese) so
-that most seams fall mid-sentence: 46 mid-phrase, 16 at a comma and 20 at a
-sentence end as the control. Three modes, three seeds each, on 3× A40 and 3× A100.
+- **Memory trades the gap against the voice.** Keeping only the last round holds
+  the voice (0.752 over whole clips, higher than the all-rounds mode on all 18
+  clips, 0.700 to 0.662 from first to last 6 s) and leaves a 0.25 s mid-phrase gap:
+  shorter than independent chunks at 87 of 138 seams. Keeping the last four rounds
+  keeps the short gap (0.16 s) and does not stop the drift (0.555 at the end).
+  No setting gives both yet.
+- **Lookahead and history both count.** Lookahead plus one round of history: 0.25 s.
+  fish-speech history, with the first and the latest chunk and no lookahead: 0.41 s.
+- **Word errors.** Whole-reply English WER is 1.7% / 0.9% / 3.4% / 0.4% (order of
+  the table above). The 3.4% comes from two clips whose chunks, transcribed one by
+  one, are at 1.0% and 3.6%; whether the recogniser or the audio is at fault is not
+  settled. One last-four-rounds chunk ran long (17.5 s for five words).
+- **Speed.** On one L40 with FP8 experts and CUDA graphs the model decodes 44.8
+  frames per second (real time: 21.5), and this offline harness, which re-reads the
+  context for every chunk, ran at RTF 0.75. Split across two cards without CUDA
+  graphs: 10.6 frames per second.
 
-| Non-speech at the seam (Silero VAD, mean) | `independent` | `fish_history` | `streaming-round` |
-|---|---|---|---|
-| Mid-phrase (English, 138 seams per mode) | 0.72 s | 0.49 s | **0.21 s** |
-| At a comma (English) | 0.69 s | 0.66 s | 0.52 s |
-| At a sentence end (English) | 0.78 s | 0.66 s | 0.87 s |
+## Limits
 
-- **Lookahead works where it should.** `streaming-round` hardly pauses inside a
-  phrase, pauses a little at commas and most at sentence ends, like natural speech;
-  `independent` pauses the same everywhere. Seam by seam, streaming paused less than
-  `independent` at 153 of 186 mid-sentence seams.
-- No lookahead was spoken early, WER stayed under 2% for every mode, and predicted
-  naturalness (UTMOS) tied.
-- `independent` once ran to the token limit: 27 s of silence after the fragment
-  "in time. The doors slid open with". Streaming never did.
-- **New problem: the streaming voice drifts.** Its similarity to the reference fell
-  from 0.685 in the first 6 s to 0.591 in the last 6 s (`independent`: 0.711 to
-  0.687), and it was below `independent` on all 18 text-seed pairs. Background noise
-  stayed flat, so this is the voice, not the noise.
-- The round-2 energy pause (silence = 40 dB below the loudest frame) was wrong: the
-  reference's room noise sits about 40 dB down and the model copies it, so pauses
-  are not silent. Pauses are now measured with Silero VAD.
+- Pause timing, plus one informal blind check by the author (8 random mid-phrase
+  cuts, three round-2 modes: streaming picked 4 times, fish-speech history 3,
+  independent chunks 1). No listening test with other listeners.
+- One reference voice (the author's own), six texts, three seeds.
+- Two hardware setups: the short-memory modes ran on L40 cards with FP8 experts,
+  the other modes on A40 and A100 cards in bf16. A control run of every mode on the
+  same card is pending.
+- The single 44 GB L40 ran out of memory when a whole reply's waveform was decoded
+  at once; the timings above come from the 7 runs finished before that.
 
-### Round 3 (now)
+## What is next
 
-Streaming that remembers only the reference plus the last 1 or 4 rounds
-(`streaming-round-w1`, `streaming-round-w4`), to keep the short mid-phrase pauses
-without the drift. Same texts and seeds as round 2, so the round-2 runs are reused:
-only the two new variants are generated, then every variant is re-scored.
-
-## Running the experiment (GPU machine)
-
-### Requirements
-
-- Linux with an NVIDIA GPU that has **48 GB+ and SM89+** (L40, L40S, RTX 6000 Ada, H100).
-  fish-speech loads only the FP8 Drama 3 checkpoint natively, and FP8 experts need
-  SM89+. Older cards (A40, A6000, A100) also work across several GPUs, e.g.
-  `--device cuda:0,cuda:1,cuda:2`: quality results are valid, but the model runs in
-  bf16 (~70 GB) without CUDA graphs, so it is much slower.
-  Avoid RTX 50-series cards (near-silent output reported on sm_120).
-- About 100 GB of disk for the weights and results.
-- Python 3.12 in a fresh environment, as fish-speech recommends:
-  `conda create -n drama3 python=3.12 && conda activate drama3`
-- System audio packages: `sudo apt install portaudio19-dev libsox-dev ffmpeg zip`
-- A Hugging Face login if the download asks for one: `hf auth login`, and accept the
-  Drama 3 license on its model page.
-- The reference voice, which is **not in this repo**. Get `voice.wav` (10-20 s) and
-  `voice.lab` (its exact transcript) from Yan and put both in `data/ref/`. To use
-  another voice, use only audio you have the rights to.
-
-### 1. Install
-
-```bash
-git clone https://github.com/yanzzzk/drama3-live.git
-cd drama3-live
-bash scripts/setup_gpu.sh 2>&1 | tee setup.log
-```
-
-This clones fish-speech next to this repo, installs both projects, and downloads the
-weights. Set `CUDA_TAG=cu126` or `cu128` first if your CUDA is older than 12.9.
-
-### 2. Smoke test
-
-One text in two modes, to catch problems before a long run:
-
-```bash
-python experiments/week1_run.py \
-    --checkpoint ../fish-speech/checkpoints/drama-3 \
-    --ref-audio data/ref/voice.wav \
-    --out results/smoke \
-    --only en_story --variants full streaming-round \
-    2>&1 | tee smoke.log
-```
-
-### 3. Round 3
-
-Run it in the same folder as round 2. It adds the two new variants next to the
-round-2 results in `results/round2/seedN/`, re-scores every variant and zips what
-is new:
-
-```bash
-git pull
-bash scripts/run_round3.sh cuda:0,cuda:1,cuda:2
-```
-
-If seed 3 of round 2 is still in `results/round2_parallel/seed3`, move it to
-`results/round2/seed3` first, or point the script at your round-2 folder with
-`OUT=...`. Rough time on 3× A40: about 2 hours, since the prompts stay short. The
-run can be stopped and restarted at any time: finished work is skipped.
-
-Round 2 was `bash scripts/run_round2.sh`, with the same options.
-
-### 4. Send back the results
-
-Send `round3_results.zip` (about 250 MB) by Drive, WeTransfer, etc. It holds the
-new audio, `scores.csv` and `seams.csv` for each seed, and both logs. In
-`seams.csv`, `time_s` is where each seam falls in that text's `all.wav`, for
-listening.
-
-**If anything fails**, there is no need to debug it. Send `round3_run.log` or
-`round3_score.log`; after a fix, `git pull` and rerun the same command.
+A session engine for the mode: keep the model's caches between rounds instead of
+re-reading the context per chunk, stream audio frame by frame, and roll the context
+back to the last frame the listener heard when they interrupt. Then a WebSocket
+protocol, a TypeScript client and a recorded live demo.
 
 ## Layout
 
 ```
-drama3_live/
-  chunker.py    split text into LLM-like streaming chunks (no torch)
+speak_as_you_think/
+  chunker.py    split text into the chunks a streaming LLM would hand over (no torch)
   prompts.py    Figure 10 streaming prompt as segments (no torch)
   encode.py     segments -> Drama 3 prompt rows
-  modes.py      the four synthesis modes (needs fish-speech + GPU)
+  modes.py      the synthesis modes (needs fish-speech + GPU)
   scoring.py    text normalization, WER/CER, lookahead leakage (no torch)
-  seams.py      seam kinds and pause lengths (no torch)
+  seams.py      seam kinds and pauses (no torch)
   timeline.py   playback timeline and stall metrics (no torch)
-experiments/    run and scoring scripts
-scripts/        GPU setup and the one-command runs of rounds 2 and 3
-data/           test texts of rounds 1 and 2; the reference voice goes in data/ref/ (git-ignored)
+experiments/    run, score and page-build scripts
+scripts/        GPU setup and one-command rounds
+data/           test texts; the reference voice goes in data/ref/ (git-ignored)
+docs/           results page, its data and clips, and the run guide
 tests/          pytest, runs on a laptop without a GPU
 ```
 
-## Roadmap
+`pytest` runs the pure-Python parts. `experiments/page_data.py` recomputes the
+pause numbers from the raw audio and reads word errors and speaker similarity from
+each seed's `scores.csv`. UTMOS was scored in a separate pass, the speed figures
+come from the run logs, and the round-1 figures from the round-1 run report.
 
-1. Week 1: validate the format offline (this)
-2. Weeks 2-4: persistent streaming session in SGLang-Omni, barge-in rollback to the
-   heard frame, deadline-aware chunking
-3. Week 5: WebSocket protocol, TypeScript SDK, demo
-4. Week 6: benchmark, listening test, write-up
+## License and attribution
 
-## License
-
-Drama 3 weights and fish-speech are under the Fish Audio Community License. This
-project is non-commercial research; audio outputs are not used to train other
-models. Built with Fish Audio.
+Built with Fish Audio. Drama 3 and fish-speech are under the Fish Audio Community
+License, Version 1.0 (copy in `LICENSE-FISH-AUDIO`). A few functions here are
+adapted from fish-speech; `NOTICE` lists them. No model weights are included. This
+project is non-commercial research and is not affiliated with or endorsed by Fish
+Audio. Audio outputs are not used to train other models. The voice in the clips is
+the author's own.

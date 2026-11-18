@@ -1,6 +1,6 @@
 import pytest
 
-from drama3_live.scoring import error_rate, leaked, normalize
+from speak_as_you_think.scoring import error_rate, leaked, normalize
 
 
 def test_normalize_english():

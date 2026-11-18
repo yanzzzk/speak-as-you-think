@@ -1,6 +1,6 @@
 import pytest
 
-from drama3_live.timeline import playback_timeline
+from speak_as_you_think.timeline import playback_timeline
 
 
 def test_no_stall_when_generation_is_faster_than_playback():

@@ -1,4 +1,4 @@
-from drama3_live.seams import edge_nonspeech, seam_kind, seam_rows
+from speak_as_you_think.seams import edge_nonspeech, seam_kind, seam_rows
 
 
 def test_seam_kinds():

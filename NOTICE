@@ -1,0 +1,27 @@
+Speak as you think
+Copyright (c) 2026 Yan Li
+
+This repository contains code adapted from Fish Speech
+(https://github.com/fishaudio/fish-speech), which is part of the Fish Audio
+Materials:
+
+    These Fish Audio Materials are licensed under the Fish Audio Community
+    License, Version 1.0. Copyright © 39 AI, INC. All Rights Reserved.
+
+A copy of that license is in LICENSE-FISH-AUDIO. The Fish Audio Materials were
+changed as follows:
+
+- speak_as_you_think/encode.py: encode_segments() follows the row-encoding loop of
+  build_drama3_prompt() in fish_speech/models/text2semantic/fish_omni/generate.py.
+  It takes a list of segments and checks the shape of the codes.
+- speak_as_you_think/prompts.py: the prompt literals (message markers, the
+  text-to-speech instruction, the reference block) equal those in
+  fish_omni/generate.py, so that prompts tokenize the same way. The streaming
+  rounds are new.
+- speak_as_you_think/chunker.py: the sentence and clause marks and the protected-span
+  loop follow fish_omni/chunking.py. Splitting by minimum and maximum characters
+  is new.
+- experiments/week1_run.py: reference_text() is taken from tools/tts_sample.py.
+
+Everything else in this repository is the author's own work. No model weights
+are included.

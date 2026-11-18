@@ -26,4 +26,4 @@ python experiments/week1_run.py \
 python experiments/week1_score.py "$OUT"/seed* 2>&1 | tee round2_score.log
 
 zip -qr round2_results.zip "$OUT" round2_run.log round2_score.log
-echo "Done. Send back round2_results.zip"
+echo "Done. Results: $OUT (also zipped as round2_results.zip)"

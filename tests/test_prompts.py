@@ -1,4 +1,4 @@
-from drama3_live.prompts import (
+from speak_as_you_think.prompts import (
     END_OF_TURN,
     GENERATION_START,
     MESSAGE_END,

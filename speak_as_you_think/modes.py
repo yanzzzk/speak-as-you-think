@@ -29,8 +29,8 @@ from fish_speech.models.text2semantic.inference import (
     resolve_codec_path,
 )
 
-from drama3_live.encode import check_special_tokens, encode_segments
-from drama3_live.prompts import RefStyle, Reference, Round, streaming_prompt
+from speak_as_you_think.encode import check_special_tokens, encode_segments
+from speak_as_you_think.prompts import RefStyle, Reference, Round, streaming_prompt
 
 MODES = ("full", "independent", "fish_history", "streaming")
 

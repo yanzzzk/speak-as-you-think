@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speak as you think: streaming-text speech with Drama 3</title>
+<meta name="description" content="What Drama 3's streaming-text format changes when an LLM's reply is cut mid-phrase: a median 0.14 s of non-speech at the cut instead of 0.45 s, and what that costs in voice stability. Audio, numbers and limits.">
+<style>
+:root {
+  --bg: #fbfaf7; --card: #ffffff; --ink: #1d1b18; --muted: #6b665e; --line: #e4e0d8;
+  --ind: #736d63; --hist: #4c6c8a; --last: #5d4fb0; --stream: #0f7b6c; --gap: #d9822b; --gap-text: #a35a0c; --rest: #cfc9bd; --track: #f1eee8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15140f; --card: #1e1c17; --ink: #f1ede4; --muted: #a39d91; --line: #34312a;
+    --ind: #a8a092; --hist: #8fb0cf; --last: #b3a8f7; --stream: #4fc3b0; --gap: #f0a04b; --gap-text: #f0a04b; --rest: #57524a; --track: #26241e;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 17px/1.62 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+}
+main { max-width: 760px; margin: 0 auto; padding: 56px 20px 80px; }
+h1, h2 { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-weight: 600; line-height: 1.18; letter-spacing: -0.01em; }
+h1 { font-size: clamp(34px, 7vw, 46px); margin: 10px 0 16px; }
+h2 { font-size: 26px; margin: 64px 0 12px; }
+h3 { font-size: 17px; margin: 26px 0 6px; }
+p { margin: 0 0 14px; }
+a { color: var(--stream); text-underline-offset: 2px; }
+code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--track); padding: 1px 5px; border-radius: 4px; }
+.eyebrow { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.dek { font-size: 20px; line-height: 1.5; max-width: 40em; }
+.order { font-size: 14px; color: var(--muted); }
+.hidden { position: absolute; left: -9999px; }
+ul { padding-left: 1.15em; margin: 0 0 14px; }
+li { margin: 0 0 9px; }
+
+.lead { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 22px 16px; margin: 28px 0 8px; }
+.lead-row { display: grid; grid-template-columns: 11.5em 1fr 4.8em; align-items: center; gap: 12px; margin: 0 0 10px; }
+.lead-row .name { font-size: 15px; }
+.lead-row .bar { height: 18px; border-radius: 4px; min-width: 3px; }
+.lead-row .value { font-variant-numeric: tabular-nums; font-weight: 650; text-align: right; white-space: nowrap; }
+.lead-row.stream .value { color: var(--stream); font-size: 22px; }
+.lead .caption { font-size: 14px; color: var(--muted); margin: 12px 0 0; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; color: var(--muted); margin: 0 0 18px; }
+.legend i { display: inline-block; width: 22px; height: 10px; border-radius: 3px; margin-right: 6px; }
+.passage { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 20px 10px; margin: 0 0 20px; }
+.passage .where { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+.passage .text { font-size: 16px; line-height: 1.75; margin: 0 0 8px; }
+.cut { display: inline-block; width: 3px; height: 1.05em; margin: 0 6px; vertical-align: -0.16em; border-radius: 2px; background: var(--gap); }
+.cut.sentence { background: var(--rest); }
+.passage .cue { font-size: 15px; margin: 0 0 16px; }
+.mode { display: grid; grid-template-columns: 44px 1fr; gap: 4px 12px; align-items: center; padding: 10px 0 12px; border-top: 1px solid var(--line); }
+.play {
+  width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid var(--c); background: transparent; color: var(--c);
+  display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+.play:hover { background: color-mix(in srgb, var(--c) 12%, transparent); }
+.play:focus-visible { outline: 3px solid color-mix(in srgb, var(--c) 45%, transparent); outline-offset: 2px; }
+.play svg { width: 16px; height: 16px; fill: currentColor; }
+.play .pause, .playing .play .start { display: none; }
+.playing .play .pause { display: block; }
+.mode .label { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.mode .label b { color: var(--c); font-weight: 650; }
+.mode .label span { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.strip-wrap { grid-column: 2; }
+.strip { position: relative; height: 22px; border-radius: 4px; background: var(--track); cursor: pointer; overflow: hidden; }
+.strip .speech { position: absolute; top: 0; bottom: 0; background: var(--c); opacity: 0.9; }
+.strip .gap { position: absolute; top: 0; bottom: 0; background: var(--gap); }
+.strip .gap.sentence { background: var(--rest); }
+.strip .head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); left: 0; opacity: 0; }
+.playing .strip .head, .touched .strip .head { opacity: 1; }
+.ticks { position: relative; height: 16px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ticks span { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
+.ticks span.mid { color: var(--gap-text); font-weight: 650; }
+
+.rows { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 6px 20px; margin: 14px 0 18px; }
+.seamrow { display: grid; grid-template-columns: 12.5em 1fr; gap: 6px 16px; padding: 14px 0; border-top: 1px solid var(--line); align-items: center; }
+.seamrow:first-child { border-top: 0; }
+.seamrow .what { font-size: 15px; }
+.seamrow .what small { display: block; color: var(--muted); font-size: 13px; }
+.seamrow .bars div { display: grid; grid-template-columns: 1fr 3.4em; align-items: center; gap: 8px; margin: 3px 0; }
+.seamrow .bars i { display: block; height: 10px; border-radius: 3px; min-width: 2px; }
+.seamrow .bars b { font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; text-align: right; }
+.seamrow .bars div.stream b { font-weight: 700; color: var(--stream); }
+.key { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; color: var(--muted); margin: 0 0 6px; }
+.key i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.scroll { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 14px; margin: 14px 0 18px; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; font-variant-numeric: tabular-nums; }
+th, td { padding: 10px 14px; text-align: right; border-top: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 600; font-size: 13px; color: var(--muted); border-top: 0; }
+th:first-child, td:first-child { text-align: left; }
+td:first-child i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; }
+pre { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0 0 14px; }
+pre .dim { color: var(--muted); }
+pre .now { color: var(--stream); }
+footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+footer p { margin: 0 0 8px; }
+@media (max-width: 560px) {
+  body { font-size: 16px; }
+  main { padding: 36px 16px 64px; }
+  .dek { font-size: 18px; }
+  .lead-row { grid-template-columns: 1fr 4.8em; }
+  .lead-row .name { grid-column: 1 / -1; margin-bottom: -6px; }
+  .seamrow { grid-template-columns: 1fr; }
+  .passage { padding: 16px 14px 6px; }
+  th, td { padding: 9px 10px; }
+}
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <p class="eyebrow">Results · November 2026 · Built with Fish Audio</p>
+  <h1>Speak as you think</h1>
+  <p class="dek">In my tests on English text, Drama 3's own streaming-text format cut the median gap where a reply is cut mid-phrase from 0.45&nbsp;s to 0.14&nbsp;s. Keeping the voice stable costs part of that: with one round of memory the gap is 0.25&nbsp;s.</p>
+  <div class="lead" id="lead" role="group" aria-label="Median non-speech at a mid-phrase cut, by mode"></div>
+</header>
+
+<section aria-labelledby="short">
+  <h2 id="short">The short version</h2>
+  <ul>
+    <li>A voice agent starts speaking before the LLM has finished its sentence, so the text is cut into small chunks. With one request per chunk, a chunk that ends mid-phrase is followed by a gap: a median 0.45&nbsp;s of non-speech at the cut.</li>
+    <li>Drama 3's tech report lists streaming text input as new: each round holds the chunk to speak plus the next chunk as lookahead. None of the open engines I checked (fish-speech, SGLang-Omni, vLLM-Omni) builds these rounds. Fish Audio's hosted services do run Drama 3 in realtime, as a closed service.</li>
+    <li>I ran the format through fish-speech on text cut inside sentences. With every earlier round in memory, the median gap at a cut with no punctuation is 0.14&nbsp;s; fish-speech's history context on the same cuts leaves 0.41&nbsp;s.</li>
+    <li>The cost is the voice: with all rounds in memory it drifts from the reference. Keeping only the last round holds the voice and leaves a 0.25&nbsp;s gap. No setting gives both yet.</li>
+    <li>On one L40 the model decodes at about twice real time, so a live session is within reach. The quality claim is about pause timing; the only listening so far is my own informal blind check.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="listen">
+  <h2 id="listen">Listen</h2>
+  <p>Does the cut sound like a stop? Same text, same cuts, same voice, four modes. A bar in the text marks each chunk cut. The strip under a player draws speech and the gap at every cut on one time axis; the small numbers are seconds of non-speech at the cut. Only playing one? Take the first passage.</p>
+  <p class="legend" aria-hidden="true">
+    <span><i style="background:var(--stream)"></i>speech</span>
+    <span><i style="background:var(--gap)"></i>gap at a cut inside a sentence</span>
+    <span><i style="background:var(--rest)"></i>pause at a sentence end</span>
+  </p>
+  <div id="passages"></div>
+  <noscript><p>The players need JavaScript. The clips are in the <a href="https://github.com/yanzzzk/speak-as-you-think/tree/main/docs/audio">audio folder of the repository</a>.</p></noscript>
+</section>
+
+<section aria-labelledby="numbers">
+  <h2 id="numbers">The numbers</h2>
+  <p>A seam is where one chunk's audio ends and the next begins. Each bar is the median non-speech there: the trailing non-speech of one chunk plus the leading non-speech of the next, by Silero VAD.</p>
+  <p class="key" aria-hidden="true" id="key"></p>
+  <div class="rows" id="seam-rows"></div>
+  <p class="order">Lists of four numbers below are in the order Independent chunks / fish-speech history / Streaming, last round / Streaming, all rounds.</p>
+  <ul>
+    <li><b>With every round in memory, the gap inside a phrase shrinks to a third.</b> Where the cut has no punctuation, both baselines leave almost half a second. Streaming with all rounds had less non-speech than Independent chunks at 117 of 138 of those cuts; with only the last round, at 87 of 138. Share of those cuts over 0.3&nbsp;s: 78% / 69% / 43% / 25%.</li>
+    <li><b>The pause follows the punctuation.</b> Streaming with all rounds: 0.14&nbsp;s inside a phrase, 0.64&nbsp;s at a comma, 0.86&nbsp;s at a sentence end. At sentence ends it did not pause less: more non-speech than Independent chunks at 34 of 60 cuts, less at 24 (English and Chinese together).</li>
+    <li><b>Lookahead and history both count.</b> With lookahead and one round of history the median is 0.25&nbsp;s. fish-speech history, which keeps the first and the latest chunk and has no lookahead, leaves 0.41&nbsp;s. More rounds help further: 0.16&nbsp;s with the last four, 0.14&nbsp;s with all.</li>
+    <li><b>Medians, because chunks can fail.</b> One Independent chunk never stopped: after the fragment “in time. The doors slid open with” it produced 27&nbsp;s of non-speech up to the token limit (1 of 264 chunks). It moves the mid-phrase mean: 0.72 / 0.49 / 0.36 / 0.21&nbsp;s with it, and 0.53 / 0.48 / 0.37 / 0.21&nbsp;s when that text's seed-1 run is left out in every mode. One streaming chunk with four rounds of memory ran long too: 17.5&nbsp;s for “morning. Outside, the city slipped”. Both chunks begin with the tail of one sentence and end inside the next.</li>
+  </ul>
+
+  <h3>Memory trades the gap against the voice</h3>
+  <p>Speaker similarity to the reference (ECAPA), over whole clips and from the first 6 seconds of a clip to the last 6.</p>
+  <div class="scroll"><table id="tradeoff"></table></div>
+  <ul>
+    <li>With all rounds in memory the voice moves away from the reference over a reply. Likely cause: the whole history is in context, so the reference weighs less over time.</li>
+    <li>Keeping only the last round holds the voice: higher similarity than the all-rounds mode on all 18 clips, and close to Independent chunks. It gives back part of the gap.</li>
+    <li>Keeping the last four rounds keeps the short gap and does not stop the drift.</li>
+    <li>No setting gives both yet. Pinning the first spoken round next to the latest one, as fish-speech's history does, is the next thing to try.</li>
+  </ul>
+
+  <h3>Checks</h3>
+  <ul>
+    <li>I transcribed every chunk: the lookahead was spoken early in 0% of them, in every streaming mode. Repeated words were not measured on their own.</li>
+    <li>English word error rate over whole replies (Whisper large-v3): 1.7% / 0.9% / 3.4% / 0.4%. The 1.7% includes the failed chunk. The 3.4% comes from two last-round clips (18.8% and 14.5%) whose chunks, transcribed one by one, are at 1.0% and 3.6%; I have not yet found out whether the recogniser or the audio is at fault. Chunk by chunk, the English error is 3.2% / 2.2% / 2.1% / 0.8%.</li>
+    <li>Predicted naturalness (UTMOSv2) was scored for the three round-2 modes only and is a tie: 3.33 Independent chunks, 3.37 fish-speech history, 3.42 Streaming with all rounds, which scored higher than Independent chunks on 9 of 18 clips.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="speed">
+  <h2 id="speed">Speed</h2>
+  <p>Measured during round 3 on one L40 (44&nbsp;GB, FP8 experts, CUDA graphs on): the model decodes 44.8 frames per second, where real time needs 21.5. The offline harness re-reads the reference and the remembered rounds for every chunk (about 620 prompt rows, 0.56&nbsp;s) and still ran at RTF 0.75 over 7 runs: a median 2.0&nbsp;s to produce a 2.8&nbsp;s chunk.</p>
+  <ul>
+    <li>Split across two L40s, fish-speech turns its CUDA graphs off and decoding falls to 10.6 frames per second (RTF 2.3). The A40 and A100 runs of rounds 1 and 2 were also split across cards, in bf16, and their timings say nothing about the model.</li>
+    <li>The single card ran out of memory when the harness decoded a whole reply's waveform at once, so the remaining runs used two cards. A live engine decodes a short window at a time.</li>
+    <li>Published figures for ordinary single-turn requests are higher still (<a href="https://sgl-project.github.io/sglang-omni/cookbook/fishaudio_drama3.html">SGLang-Omni cookbook</a>, one H200, one stream, pre-encoded reference: mean RTF 0.131, median first audio 88.9&nbsp;ms).</li>
+  </ul>
+</section>
+
+<section aria-labelledby="limits">
+  <h2 id="limits">Limits</h2>
+  <ul>
+    <li><b>Two hardware setups.</b> The two short-memory modes ran on L40 cards with FP8 experts; the other three ran on A40 and A100 cards in bf16. Same weights, different arithmetic. A control run of every mode on the same card is pending, so comparisons between the short-memory modes and the rest carry that caveat.</li>
+    <li><b>The first cut of a reply gets no short pause.</b> At the first cut of a text, streaming left a median 0.72&nbsp;s with all rounds and with the last round alike (9 English mid-phrase cuts: 3 texts, 3 seeds), against 0.13&nbsp;s and 0.22&nbsp;s from the second cut on. Against Independent chunks the first cut is mixed: a higher median (0.72&nbsp;s against 0.48&nbsp;s), yet with all rounds shorter at 6 of the 9 cuts.</li>
+    <li><b>Pause timing, plus one informal listen.</b> I listened blind to 8 randomly drawn mid-phrase cuts from round 2, three modes in random order, and picked the one that sounded least broken: Streaming with all rounds 4 times, fish-speech history 3, Independent chunks 1. My pick was the mode with the shortest measured gap at 4 of the 8. One listener who knows the project is not a listening test, and pause length is not the same as sentence-ending prosody.</li>
+    <li><b>Small test.</b> One voice (my own), six texts, three seeds. The Chinese texts were cut at punctuation, so the mid-phrase effect is tested in English only.</li>
+    <li><b>Lookahead costs text.</b> A chunk can be spoken only once the next chunk has arrived from the LLM. What that adds to time to first audio is not measured yet.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="how">
+  <h2 id="how">How it works</h2>
+  <p>The format is Figure 10 in Appendix A of the <a href="https://arxiv.org/html/2610.18010v2">tech report</a>. Each round, the user turn holds the chunk to speak, the token <code>&lt;|endofturn|&gt;</code>, and the next chunk as lookahead; the assistant turn is the audio of the current chunk. Earlier rounds stay in context, and an empty lookahead marks the last round.</p>
+<pre><span class="dim">system     </span>streaming speech continuation with one-chunk lookahead split by &lt;|endofturn|&gt;
+<span class="dim">user       </span>[reference transcript]&lt;|endofturn|&gt;The train was already moving when
+<span class="dim">assistant  </span>[reference audio]
+<span class="dim">user       </span><span class="now">The train was already moving when</span>&lt;|endofturn|&gt;Anna reached the platform, her
+<span class="dim">assistant  </span>[audio of “The train was already moving when”]
+<span class="dim">user       </span><span class="now">Anna reached the platform, her</span>&lt;|endofturn|&gt;bag bouncing against her hip.
+<span class="dim">assistant  </span>[audio of “Anna reached the platform, her”]</pre>
+  <p class="order">Schematic: chat-template tokens are left out. Two things are my choice and not in Figure 10: a <code>&lt;|speaker:0|&gt;</code> tag at the start of each user turn, as fish-speech writes its own turns, and the reference clip as round 0, which in round 1 stayed closer to the reference voice than a reference in the system prompt.</p>
+  <ul>
+    <li><b>Test.</b> Six texts in the style of agent replies and short stories (4 English, 2 Chinese), cut into chunks of about 30 characters in English and 14 in Chinese so that most cuts fall inside a sentence. Per run: 46 mid-phrase cuts, 16 at a comma, 20 at a sentence end. Three seeds, 264 chunks per mode.</li>
+    <li><b>Independent chunks.</b> Each chunk synthesized alone with the reference, as a chunk-per-request cascade does.</li>
+    <li><b>fish-speech history.</b> fish-speech's long-form context rule on the same cuts: the first and the latest chunk, no lookahead. On its own, fish-speech cuts at about 300 bytes and prefers sentence ends.</li>
+    <li><b>Streaming.</b> The format above with every earlier round in context, or with only the last round or the last four besides the reference.</li>
+    <li><b>Harness.</b> About 1,200 lines of Python around fish-speech, with unit tests on the pure-Python parts. One script rebuilds the pause numbers and every clip on this page from the raw audio; error rates and speaker similarity come from the scoring step, and UTMOS was scored separately.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="context">
+  <h2 id="context">Has this been measured before?</h2>
+  <p>The tech report defines the format and lists streaming text input as new. Its streaming evaluation (Section 5.4) covers streamed audio output, one sentence per request. I found no measurement of the streaming-text format in it.</p>
+  <p>SGLang-Omni's roadmap (<a href="https://github.com/sgl-project/sglang-omni/issues/2994">issue 2994</a>, item B8) asks to evaluate a small text-lookahead window, to verify that lookahead text is “neither spoken early nor repeated”, to measure sentence-ending prosody, and to document whether the capability already exists or requires model changes. <a href="https://github.com/sgl-project/sglang-omni/pull/3318">Pull request 3318</a> (open) tested lookahead on a different model, Qwen3-TTS Base, at sentence boundaries and reported: “The only thing lookahead changed was the pause between sentences.” <a href="https://github.com/sgl-project/sglang-omni/pull/3263">Pull request 3263</a> (open) ran Drama 3 at its default flags, one request per sentence, found it behind Qwen3-TTS Base on intelligibility, sentence-to-sentence voice consistency and speed, and proposes keeping Qwen3-TTS Base for the cascade.</p>
+  <p>Neither ran Drama 3 in its own streaming-text format with cuts inside sentences. This page is that arm. On B8's last question: the capability is in the model, and what is missing is an engine that keeps the rounds. The consistency concern holds here too: voice stability is where this mode has to be tuned.</p>
+</section>
+
+<section aria-labelledby="next">
+  <h2 id="next">What is next</h2>
+  <p>A session engine for the mode: keep the model's caches between rounds instead of re-reading the context per chunk, stream audio frame by frame, and on interruption roll the context back to the last frame the listener heard. Then a WebSocket protocol, a TypeScript/React client, and a recorded live demo: LLM text in, speech out, one interruption, latency on screen.</p>
+</section>
+
+<footer>
+  <p>Built with Fish Audio. Drama 3 and fish-speech are under the <a href="https://github.com/fishaudio/fish-speech/blob/main/LICENSE">Fish Audio Community License, Version 1.0</a>; this is non-commercial research, not affiliated with or endorsed by Fish Audio.</p>
+  <p>The voice in every clip is my own, cloned with consent.</p>
+  <p>Clip rule: for each passage, the seed whose pauses in that passage are closest to the three-seed average; the same chunks in every mode; level-matched, otherwise unedited.</p>
+  <p>Yan Li · <a href="https://github.com/yanzzzk/speak-as-you-think">code, data and the script that builds this page</a></p>
+</footer>
+</main>
+
+<script src="data.js"></script>
+<script>
+const D = window.PAGE_DATA;
+const MODES = [
+  { key: "independent", name: "Independent chunks", color: "var(--ind)" },
+  { key: "fish_history", name: "fish-speech history", color: "var(--hist)" },
+  { key: "streaming-round-w1", name: "Streaming, last round", color: "var(--last)" },
+  { key: "streaming-round", name: "Streaming, all rounds", color: "var(--stream)" },
+];
+// Only in the memory table: its clips are not on the page.
+const LAST_FOUR = { key: "streaming-round-w4", name: "Streaming, last 4 rounds", color: "var(--rest)" };
+const PASSAGES = {
+  en_train: {
+    where: "Start of a reply · English",
+    cue: "Four cuts fall inside a phrase: after “when”, “her”, “empty” and “only a”. With all rounds in memory the gaps there are 0.03 to 0.29 s; with only the last round, in this passage, they stay above 0.6 s.",
+  },
+  en_billing: {
+    where: "Middle of a reply · English",
+    cue: "Seven chunks into a reply. Five cuts have no punctuation: after “charge”, “has”, “it can”, “to show” and “you don't”. Both streaming modes leave almost no gap at the last two.",
+  },
+  en_directions: {
+    where: "Start of a reply · English · the first cut",
+    cue: "After “the easiest way to”, the first cut of the reply, both streaming modes leave a longer gap than the baselines. At the last cut, after “turn left”, only the all-rounds mode closes it.",
+  },
+  zh_trip: {
+    where: "Start of a reply · Chinese, cut at punctuation",
+    cue: "No mid-phrase cut to test here. Across the Chinese texts the modes measure close at commas.",
+  },
+};
+const KIND = { word: "inside a phrase", clause: "at a comma", sentence: "at a sentence end" };
+const el = (tag, attrs = {}, ...children) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) k === "style" ? (node.style.cssText = v) : node.setAttribute(k, v);
+  node.append(...children);
+  return node;
+};
+const sec = (x) => x.toFixed(2) + " s";
+const clock = (t) => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0");
+const shown = MODES.filter((m) => D && D.source.variants.includes(m.key));
+
+function renderLead() {
+  const row = D.seams.table.find((r) => r.lang === "en" && r.kind === "word");
+  const max = Math.max(...shown.map((m) => row.median[m.key]));
+  const box = document.getElementById("lead");
+  for (const m of shown) {
+    const v = row.median[m.key];
+    box.append(el("div", { class: "lead-row" + (m.key === "streaming-round" ? " stream" : "") },
+      el("span", { class: "name" }, m.name),
+      el("span", { class: "bar", style: `width:${(v / max) * 100}%;background:${m.color}` }),
+      el("span", { class: "value" }, sec(v))));
+  }
+  box.append(el("p", { class: "caption" },
+    `Median non-speech at a cut inside a phrase. English, ${row.n} cuts per mode, 3 seeds.`));
+}
+
+let current = null;
+function stop(player) {
+  player.audio.pause();
+  player.root.classList.remove("playing");
+  cancelAnimationFrame(player.frame);
+}
+function tick(player) {
+  const a = player.audio;
+  player.head.style.left = `calc(${(a.currentTime / player.seconds) * 100}% - 1px)`;
+  player.time.textContent = `${clock(a.currentTime)} / ${clock(player.seconds)}`;
+  if (!a.paused) player.frame = requestAnimationFrame(() => tick(player));
+}
+function start(player) {
+  if (current && current !== player) stop(current);
+  current = player;
+  player.root.classList.add("playing", "touched");
+  player.audio.play().then(() => tick(player), () => stop(player));
+}
+// The clips load on first use, so a seek waits until the browser can reach that point.
+function applySeek(player) {
+  const a = player.audio;
+  const reach = a.seekable.length ? a.seekable.end(a.seekable.length - 1) : 0;
+  if (player.pending === null || reach < player.pending) return;
+  a.currentTime = player.pending;
+  player.pending = null;
+}
+function seek(player, fraction) {
+  player.pending = fraction * player.seconds;
+  applySeek(player);
+  start(player);
+}
+
+function renderMode(mode, longest, number) {
+  const m = MODES.find((x) => x.key === mode.variant);
+  const audio = new Audio();
+  audio.preload = "none";
+  audio.src = mode.file;
+  const width = `width:${(mode.seconds / longest) * 100}%`;
+  const pct = (t) => (t / mode.seconds) * 100;
+  const head = el("div", { class: "head" });
+  const strip = el("div", { class: "strip", style: width });
+  const ticks = el("div", { class: "ticks", style: width, "aria-hidden": "true" });
+  for (const [a, b] of mode.speech) strip.append(el("div", { class: "speech", style: `left:${pct(a)}%;width:${pct(b - a)}%` }));
+  for (const s of mode.seams) {
+    const mid = s.kind !== "sentence";
+    strip.append(el("div", { class: "gap" + (mid ? "" : " sentence"), style: `left:${pct(s.from)}%;width:${pct(s.to - s.from)}%`,
+      title: `${s.pause.toFixed(2)} s of non-speech at a cut ${KIND[s.kind]}` }));
+    ticks.append(el("span", { class: mid ? "mid" : "", style: `left:${pct((s.from + s.to) / 2)}%` }, s.pause.toFixed(2)));
+  }
+  strip.append(head);
+  const time = el("span", {}, `0:00 / ${clock(mode.seconds)}`);
+  const button = el("button", { class: "play", type: "button", "aria-label": `Play ${m.name}, passage ${number}` });
+  button.innerHTML = '<svg class="start" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>' +
+    '<svg class="pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z"/></svg>';
+  const pauses = mode.seams.map((s) => `${s.pause.toFixed(2)} ${KIND[s.kind]}`).join("; ");
+  const root = el("div", { class: "mode", style: `--c:${m.color}` },
+    button,
+    el("div", { class: "label" }, el("b", {}, m.name), time),
+    el("div", { class: "strip-wrap" }, strip, ticks,
+      el("span", { class: "hidden" }, `${m.name}: ${mode.seconds.toFixed(1)} seconds long. Seconds of non-speech at each cut: ${pauses}.`)));
+  const player = { audio, root, head, time, seconds: mode.seconds, frame: 0, pending: null };
+  for (const type of ["loadedmetadata", "progress", "canplaythrough"]) audio.addEventListener(type, () => applySeek(player));
+  button.addEventListener("click", () => (audio.paused ? start(player) : stop(player)));
+  strip.addEventListener("click", (event) => {
+    const box = strip.getBoundingClientRect();
+    seek(player, Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)));
+  });
+  audio.addEventListener("ended", () => { stop(player); audio.currentTime = 0; tick(player); });
+  return root;
+}
+
+function renderPassages() {
+  const host = document.getElementById("passages");
+  D.clips.forEach((clip, index) => {
+    const copy = PASSAGES[clip.text_id];
+    const text = el("p", { class: "text", lang: clip.lang });
+    const kinds = clip.modes[0].seams.map((s) => s.kind);
+    clip.chunks.forEach((chunk, i) => {
+      text.append(chunk);
+      if (i < clip.chunks.length - 1) {
+        text.append(el("span", { class: "cut " + kinds[i], role: "img", title: `cut ${KIND[kinds[i]]}`, "aria-label": `cut ${KIND[kinds[i]]}` }));
+      }
+    });
+    const cue = el("p", { class: "cue" }, el("b", {}, "Listen for: "), copy.cue);
+    const longest = Math.max(...clip.modes.map((m) => m.seconds));
+    const card = el("article", { class: "passage" },
+      el("p", { class: "where" }, `Passage ${index + 1} · ${copy.where}`), text, cue);
+    for (const mode of clip.modes) card.append(renderMode(mode, longest, index + 1));
+    host.append(card);
+  });
+}
+
+function renderSeamRows() {
+  const names = { word: "Inside a phrase", clause: "At a comma", sentence: "At a sentence end" };
+  const key = document.getElementById("key");
+  for (const m of shown) key.append(el("span", {}, el("i", { style: `background:${m.color}` }), m.name));
+  const host = document.getElementById("seam-rows");
+  const max = Math.max(...D.seams.table.flatMap((r) => shown.map((m) => r.median[m.key])));
+  for (const r of D.seams.table) {
+    const language = r.lang === "en" ? "English" : "Chinese";
+    const bars = el("div", { class: "bars", "aria-hidden": "true" });
+    for (const m of shown) {
+      bars.append(el("div", { class: m.key === "streaming-round" ? "stream" : "" },
+        el("i", { style: `width:${(r.median[m.key] / max) * 100}%;background:${m.color}` }),
+        el("b", {}, sec(r.median[m.key]))));
+    }
+    host.append(el("div", { class: "seamrow" },
+      el("div", { class: "what" }, names[r.kind], el("small", {}, `${language} · ${r.n} cuts per mode`)),
+      bars,
+      el("span", { class: "hidden" }, shown.map((m) => `${m.name} ${sec(r.median[m.key])}`).join(", "))));
+  }
+}
+
+function renderTradeoff() {
+  const gap = D.seams.table.find((r) => r.lang === "en" && r.kind === "word").median;
+  const sim = D.items;
+  const table = document.getElementById("tradeoff");
+  table.append(el("tr", {}, ...["Mode", "Gap inside a phrase", "Voice, whole clip", "Voice, first 6 s to last 6 s"].map((h) => el("th", { scope: "col" }, h))));
+  const order = [MODES[0], MODES[1], MODES[2], LAST_FOUR, MODES[3]].filter((m) => m.key in gap);
+  for (const m of order) {
+    table.append(el("tr", {},
+      el("td", {}, el("i", { style: `background:${m.color}` }), m.name),
+      el("td", {}, sec(gap[m.key])),
+      el("td", {}, sim.sim_all[m.key].toFixed(3)),
+      el("td", {}, `${sim.sim_first[m.key].toFixed(3)} to ${sim.sim_last[m.key].toFixed(3)}`)));
+  }
+}
+
+// Hide a pause label when it would run into one already placed; mid-sentence labels go first.
+function fitTicks() {
+  for (const row of document.querySelectorAll(".ticks")) {
+    const placed = [];
+    for (const span of row.children) span.style.visibility = "visible";
+    for (const mid of [true, false]) {
+      for (const span of row.children) {
+        if (span.classList.contains("mid") !== mid) continue;
+        const box = span.getBoundingClientRect();
+        if (placed.every((p) => box.right + 3 < p.left || box.left - 3 > p.right)) placed.push(box);
+        else span.style.visibility = "hidden";
+      }
+    }
+  }
+}
+
+if (D) {
+  renderLead();
+  renderPassages();
+  renderSeamRows();
+  renderTradeoff();
+  fitTicks();
+  window.addEventListener("resize", fitTicks);
+} else {
+  document.getElementById("lead").textContent = "The data file (data.js) did not load.";
+}
+</script>
+</body>
+</html>

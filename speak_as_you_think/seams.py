@@ -6,7 +6,7 @@ should remove. Sentence ends are the control: a pause there is natural.
 
 from collections.abc import Sequence
 
-from drama3_live.chunker import CLAUSE_MARKS, SENTENCE_ENDS
+from speak_as_you_think.chunker import CLAUSE_MARKS, SENTENCE_ENDS
 
 CLOSING_MARKS = "\"'”’)」』】"
 

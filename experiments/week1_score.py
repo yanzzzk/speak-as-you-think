@@ -20,9 +20,9 @@ import soundfile as sf
 import torch
 import torchaudio
 
-from drama3_live.scoring import error_rate, leaked
-from drama3_live.seams import edge_nonspeech, seam_rows
-from drama3_live.timeline import playback_timeline
+from speak_as_you_think.scoring import error_rate, leaked
+from speak_as_you_think.seams import edge_nonspeech, seam_rows
+from speak_as_you_think.timeline import playback_timeline
 
 COLUMNS = (
     "text_id",

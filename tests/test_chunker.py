@@ -1,6 +1,6 @@
 import pytest
 
-from drama3_live.chunker import split_chunks
+from speak_as_you_think.chunker import split_chunks
 
 
 def test_sentences_become_chunks():

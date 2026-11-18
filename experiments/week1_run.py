@@ -19,8 +19,8 @@ from pathlib import Path
 import soundfile as sf
 import torch
 
-from drama3_live.chunker import split_chunks
-from drama3_live.modes import (
+from speak_as_you_think.chunker import split_chunks
+from speak_as_you_think.modes import (
     Drama3,
     Sampling,
     run_fish_history,
