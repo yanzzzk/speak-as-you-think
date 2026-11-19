@@ -1,7 +1,30 @@
-# Speak as you think
+<p align="center">
+  <img src="docs/assets/hero.svg" width="860" alt="Median gap where a reply is cut mid-phrase, in the experiments: 0.45 s one chunk at a time, 0.25 s with lookahead and short memory, 0.14 s with lookahead and full memory">
+</p>
 
-Streaming-text speech for realtime voice agents. **Built with Fish Audio**
-([Drama 3](https://huggingface.co/fishaudio/drama-3)).
+<h1 align="center">Speak as you think</h1>
+
+<p align="center">
+  Streaming-text speech for realtime voice agents.<br>
+  <b>Built with Fish Audio</b> (<a href="https://huggingface.co/fishaudio/drama-3">Drama 3</a>)
+</p>
+
+<p align="center">
+  <a href="https://yanzzzk.github.io/speak-as-you-think/live/"><b>Live demo</b></a> ·
+  <a href="https://yanzzzk.github.io/speak-as-you-think/"><b>Results with audio</b></a> ·
+  <a href="docs/RUNNING.md"><b>Run it</b></a> ·
+  <a href="https://arxiv.org/html/2610.18010v2"><b>Tech report</b></a>
+</p>
+
+<p align="center">
+  <a href="https://yanzzzk.github.io/speak-as-you-think/#demo">
+    <img src="docs/assets/demo.gif" width="860" alt="The live demo: text arrives a few characters at a time, each chunk is spoken with the next one as lookahead, and the gap at every cut is measured as it plays">
+  </a>
+  <br>
+  <sub>The live demo running on one H100. <a href="https://yanzzzk.github.io/speak-as-you-think/#demo">Watch the full recording with sound</a> (2 min 48 s), or <a href="https://yanzzzk.github.io/speak-as-you-think/live/">try the recorded replay</a>.</sub>
+</p>
+
+## What this is
 
 An LLM writes its reply a few words at a time. To start speaking early, a voice
 agent has to cut that text before the sentence is finished, and a chunk that ends
@@ -18,10 +41,6 @@ changes and is building the session engine for it.
 median gap from **0.45 s** to **0.14 s**. Keeping the voice stable costs part of
 that: with one round of memory the gap is 0.25 s. On one L40 the model decodes at
 about twice real time.
-
-**[Results page with audio and a recording of the live demo](https://yanzzzk.github.io/speak-as-you-think/)** ·
-**[Live demo, replayed from recorded runs](https://yanzzzk.github.io/speak-as-you-think/live/)** ·
-[How to run it](docs/RUNNING.md)
 
 | Median non-speech at the cut | Independent chunks | fish-speech history | Streaming, last round | Streaming, all rounds |
 |---|---|---|---|---|
