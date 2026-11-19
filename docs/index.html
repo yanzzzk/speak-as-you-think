@@ -44,6 +44,9 @@ li { margin: 0 0 9px; }
 .lead-row .value { font-variant-numeric: tabular-nums; font-weight: 650; text-align: right; white-space: nowrap; }
 .lead-row.stream .value { color: var(--stream); font-size: 22px; }
 .lead .caption { font-size: 14px; color: var(--muted); margin: 12px 0 0; }
+.demo { margin: 28px 0 8px; }
+.demo video { display: block; width: 100%; height: auto; aspect-ratio: 1920 / 1246; border-radius: 14px; border: 1px solid var(--line); background: #000; }
+.demo figcaption { font-size: 14px; color: var(--muted); margin: 10px 0 0; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; color: var(--muted); margin: 0 0 18px; }
 .legend i { display: inline-block; width: 22px; height: 10px; border-radius: 3px; margin-right: 6px; }
@@ -121,6 +124,13 @@ footer p { margin: 0 0 8px; }
   <div class="lead" id="lead" role="group" aria-label="Median non-speech at a mid-phrase cut, by mode"></div>
   <p class="order">Hear it happen: <a href="live/">the live demo, replayed from recorded runs</a>. One reply spoken three ways, the gap at each cut measured as it plays, and an interrupt button.</p>
 </header>
+
+<figure class="demo" id="demo">
+  <video controls preload="none" playsinline poster="demo-poster.jpg">
+    <source src="demo.mp4" type="video/mp4">
+  </video>
+  <figcaption>Screen recording of the live demo running on one NVIDIA H100, 2 min 48 s: the same reply spoken one chunk at a time, with lookahead and full memory, and with lookahead and short memory; interrupted, reported, and continued from the last word heard. The sound was recorded through the laptop's microphone.</figcaption>
+</figure>
 
 <section aria-labelledby="short">
   <h2 id="short">The short version</h2>

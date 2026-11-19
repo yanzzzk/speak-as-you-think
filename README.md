@@ -19,7 +19,7 @@ median gap from **0.45 s** to **0.14 s**. Keeping the voice stable costs part of
 that: with one round of memory the gap is 0.25 s. On one L40 the model decodes at
 about twice real time.
 
-**[Results page with audio](https://yanzzzk.github.io/speak-as-you-think/)** ·
+**[Results page with audio and a recording of the live demo](https://yanzzzk.github.io/speak-as-you-think/)** ·
 **[Live demo, replayed from recorded runs](https://yanzzzk.github.io/speak-as-you-think/live/)** ·
 [How to run it](docs/RUNNING.md)
 
