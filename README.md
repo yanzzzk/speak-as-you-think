@@ -119,6 +119,7 @@ speak_as_you_think/
   chunker.py    split text into the chunks a streaming LLM would hand over (no torch)
   prompts.py    Figure 10 streaming prompt as segments (no torch)
   encode.py     segments -> Drama 3 prompt rows
+  live.py       a reply as messages: text in, audio chunks out, interruption (no torch)
   modes.py      the synthesis modes (needs fish-speech + GPU)
   scoring.py    text normalization, WER/CER, lookahead leakage (no torch)
   seams.py      seam kinds and pauses (no torch)
@@ -127,6 +128,7 @@ experiments/    run, score and page-build scripts
 scripts/        GPU setup and one-command rounds
 data/           test texts; the reference voice goes in data/ref/ (git-ignored)
 docs/           results page, its data and clips, and the run guide
+web/            the live demo page (v0)
 tests/          pytest, runs on a laptop without a GPU
 ```
 

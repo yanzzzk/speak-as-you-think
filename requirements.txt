@@ -7,3 +7,6 @@ pytest
 # Scoring (GPU machine; fish-speech already brings torch and torchaudio)
 faster-whisper
 speechbrain
+
+# Live demo server
+aiohttp

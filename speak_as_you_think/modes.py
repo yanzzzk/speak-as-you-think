@@ -30,6 +30,7 @@ from fish_speech.models.text2semantic.inference import (
 )
 
 from speak_as_you_think.encode import check_special_tokens, encode_segments
+from speak_as_you_think.live import Spoken
 from speak_as_you_think.prompts import RefStyle, Reference, Round, streaming_prompt
 
 MODES = ("full", "independent", "fish_history", "streaming")
@@ -197,3 +198,65 @@ def run_streaming(
         if codes.shape[1]:
             history.append(Round(chunk, lookahead, codes))
     return results
+
+
+class LiveSpeaker:
+    """Speaks one reply chunk by chunk for speak_as_you_think.live: run_streaming, a chunk at a time."""
+
+    def __init__(
+        self,
+        engine: Drama3,
+        refs: Sequence[Reference],
+        sampling: Sampling,
+        speaker_tag: bool = True,
+    ) -> None:
+        self.engine, self.refs, self.sampling = engine, refs, sampling
+        self.speaker_tag = speaker_tag
+        self.sample_rate = engine.sample_rate
+        self.begin("streaming-last")
+
+    def begin(self, mode: str) -> None:
+        """Start a new reply: forget the last one and pick how much to remember."""
+        self.independent = mode == "independent"
+        self.max_history = None if mode == "streaming-all" else 1
+        self.history: list[Round] = []
+
+    def prompt(self, text: str, lookahead: str) -> torch.Tensor:
+        if self.independent:
+            return build_drama3_prompt(
+                text,
+                self.engine.tokenizer,
+                self.engine.config,
+                [r.text for r in self.refs],
+                [r.codes for r in self.refs],
+            )
+        known = len(self.history)
+        first = 0 if self.max_history is None else max(0, known - self.max_history)
+        for start in range(first, known + 1):
+            segments = streaming_prompt(
+                text, lookahead, self.history[start:], self.refs, "round", self.speaker_tag
+            )
+            prompt = encode_segments(segments, self.engine.tokenizer, self.engine.config)
+            if _fits(self.engine, len(prompt), DRAMA3_CHUNK_MAX_NEW_TOKENS):
+                return prompt
+        raise ValueError("chunk does not fit even without history")
+
+    def speak(self, text: str, lookahead: str) -> Spoken:
+        started = time.perf_counter()
+        prompt = self.prompt(text, lookahead)
+        # A chunk that will not stop must not hold up a live reply: about 4x normal speech.
+        budget = min(DRAMA3_CHUNK_MAX_NEW_TOKENS, 60 + 6 * len(text))
+        codes, model_s, finish = self.engine.generate(prompt, budget, self.sampling)
+        audio = self.engine.decode(codes) if codes.shape[1] else torch.zeros(0)
+        if not self.independent and codes.shape[1]:
+            self.history.append(Round(text, lookahead, codes))
+        pcm = (audio.clamp(-1, 1) * 32767).to(torch.int16).numpy().tobytes()
+        info = {
+            "prompt_rows": len(prompt),
+            "frames": codes.shape[1],
+            "finish_reason": finish,
+            "model_s": round(model_s, 3),
+        }
+        return Spoken(
+            text, lookahead, pcm, len(audio) / self.sample_rate, time.perf_counter() - started, info
+        )

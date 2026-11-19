@@ -100,3 +100,27 @@ This recomputes the pause numbers from the raw audio, reads the other scores fro
 each seed's `scores.csv`, and rewrites `docs/data.js` and the clips in `docs/audio/`.
 UTMOS is added only if a CSV with `utmos_joined` per seed, text and mode is there:
 `combined_metrics.csv` in the run folder, or any file passed with `--extra`.
+
+## 6. Live demo (v0)
+
+Text goes in over a WebSocket piece by piece; speech comes back chunk by chunk and
+plays in the browser, with an interrupt button. Try the page on a laptop first, with
+tones standing in for the model:
+
+```bash
+pip install -e . -r requirements.txt
+python experiments/live_server.py --fake
+```
+
+On the GPU machine, with the whole model on one card:
+
+```bash
+python experiments/live_server.py \
+    --checkpoint ../fish-speech/checkpoints/drama-3 \
+    --ref-audio data/ref/voice.wav
+```
+
+Open the address it prints. It carries a token, because the socket speaks in the
+reference voice: keep it private. v0 sends whole chunks, so the first audio waits
+for the first chunk to be generated; frame-by-frame streaming and rolling back to
+the exact frame on interruption come with the session engine.

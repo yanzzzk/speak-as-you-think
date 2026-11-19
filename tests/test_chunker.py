@@ -1,6 +1,8 @@
+import json
+
 import pytest
 
-from speak_as_you_think.chunker import split_chunks
+from speak_as_you_think.chunker import StreamChunker, join_chunks, split_chunks
 
 
 def test_sentences_become_chunks():
@@ -62,3 +64,44 @@ def test_special_tokens_and_cues_stay_whole():
 def test_bad_limits():
     with pytest.raises(ValueError):
         split_chunks("x", min_chars=10, max_chars=5)
+
+
+def _stream(text: str, sizes: list[int], **limits) -> tuple[list[str], list[str]]:
+    """Feed text in pieces of the given sizes; return (chunks before close, all chunks)."""
+    chunker, early, position = StreamChunker(**limits), [], 0
+    for index in range(len(text)):
+        size = sizes[index % len(sizes)]
+        if position >= len(text):
+            break
+        early += chunker.feed(text[position : position + size])
+        position += size
+    return early, early + chunker.close()
+
+
+@pytest.mark.parametrize("sizes", [[1], [3], [7, 2, 11], [40], [1000]])
+def test_stream_chunker_matches_split_chunks(sizes):
+    limits = {"min_chars": 12, "max_chars": 30}
+    for line in open("data/round2_texts.jsonl", encoding="utf-8"):
+        text = json.loads(line)["text"]
+        early, chunks = _stream(text, sizes, **limits)
+        assert chunks == split_chunks(text, **limits)
+        assert early == chunks[: len(early)]
+
+
+def test_stream_chunker_hands_out_a_chunk_once_the_next_one_is_safe():
+    chunker = StreamChunker(min_chars=12, max_chars=30)
+    assert chunker.feed("It was late. And the") == []  # "And the" could still merge back
+    assert chunker.feed(" hall was") == ["It was late."]
+    assert chunker.close() == ["And the hall was"]
+
+
+def test_stream_chunker_keeps_numbers_whole_across_pieces():
+    chunker = StreamChunker(min_chars=5, max_chars=30)
+    chunks = chunker.feed("The fee is 3.") + chunker.feed("5 dollars per month. See you then.") + chunker.close()
+    assert chunks == ["The fee is 3.5 dollars per month.", "See you then."]
+
+
+def test_join_chunks():
+    assert join_chunks(["It was late,", "and the hall"]) == "It was late, and the hall"
+    assert join_chunks(["夜已经很深了，", "走廊里没有人。"]) == "夜已经很深了，走廊里没有人。"
+    assert join_chunks([]) == ""
