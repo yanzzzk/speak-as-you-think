@@ -9,6 +9,31 @@ from collections.abc import Sequence
 from speak_as_you_think.chunker import CLAUSE_MARKS, SENTENCE_ENDS
 
 CLOSING_MARKS = "\"'”’)」』】"
+VAD_RATE = 16000  # the sample rate the speech detector expects
+
+
+class SpeechDetector:
+    """Silero VAD as bundled with faster-whisper, with the settings of round 2.
+
+    The one detector behind the scores, the results page and the live demo, so a
+    pause is measured the same way everywhere.
+    """
+
+    def __init__(self) -> None:
+        from faster_whisper.vad import VadOptions, get_speech_timestamps  # loaded on use
+
+        self._detect = get_speech_timestamps
+        self._options = VadOptions(
+            threshold=0.5, min_speech_duration_ms=250, min_silence_duration_ms=100, speech_pad_ms=30
+        )
+
+    def segments(self, samples) -> list[tuple[int, int]]:
+        """(start, end) sample indices of speech in mono float32 audio at VAD_RATE."""
+        return [(s["start"], s["end"]) for s in self._detect(samples, self._options)]
+
+    def edges(self, samples) -> tuple[float, float]:
+        """Seconds of non-speech at the start and at the end of the clip."""
+        return edge_nonspeech(self.segments(samples), len(samples), VAD_RATE)
 
 
 def seam_kind(chunk: str) -> str:

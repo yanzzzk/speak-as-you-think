@@ -121,6 +121,38 @@ python experiments/live_server.py \
 ```
 
 Open the address it prints. It carries a token, because the socket speaks in the
-reference voice: keep it private. v0 sends whole chunks, so the first audio waits
-for the first chunk to be generated; frame-by-frame streaming and rolling back to
-the exact frame on interruption come with the session engine.
+reference voice: keep it private. The page takes the token out of the address bar
+once it has read it and keeps it for that browser tab; after a restart the server
+prints a new address.
+
+The page speaks one reply in three ways (each chunk alone, lookahead with the last
+round, lookahead with all rounds). It marks every cut in the reply text with the gap
+measured there, by the same detector and settings as the scores of the experiments;
+draws text arrival, generation and playback on one clock; and after an interruption
+shows the server's report of what was heard. With `--fake` the gaps are those of the
+tones and are not compared with the experiments.
+
+v0 sends whole chunks, so the first audio waits for the first chunk to be generated,
+and it waits for the next chunk's text in all three ways. Frame-by-frame streaming
+and rolling back to the exact frame on interruption are not built yet.
+
+### The page without a server: recorded replay
+
+`docs/live/index.html` is the same page. Opened without a token, as on GitHub Pages,
+it replays the runs in `docs/live/recordings/`: the messages the server sent, at the
+times they arrived, with the audio. Nothing is generated, text cannot be changed, and
+continuing after an interruption is not offered. To record new runs, with the live
+server running on the GPU machine:
+
+```bash
+python experiments/live_record.py --token <token> --raw results/live_recordings
+```
+
+and to pack them for the page, anywhere with ffmpeg:
+
+```bash
+python experiments/live_record.py --raw results/live_recordings --out docs/live/recordings
+```
+
+Every take is kept and the page plays them in turn. The audio is in the reference
+voice: publish it only if that voice may be public.

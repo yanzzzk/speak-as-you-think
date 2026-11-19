@@ -21,7 +21,7 @@ import torch
 import torchaudio
 
 from speak_as_you_think.scoring import error_rate, leaked
-from speak_as_you_think.seams import edge_nonspeech, seam_rows
+from speak_as_you_think.seams import VAD_RATE, SpeechDetector, seam_rows
 from speak_as_you_think.timeline import playback_timeline
 
 COLUMNS = (
@@ -46,7 +46,7 @@ COLUMNS = (
 SEAM_COLUMNS = ("text_id", "lang", "variant", "seed", "seam", "kind", "time_s", "pause_s", "at")
 # Lower is better for these; higher for the rest.
 LOWER_IS_BETTER = {"err_all", "err_chunk_mean", "leak_rate", "first_chunk_s", "stall_s", "rtf"}
-SAMPLE_RATE = 16000  # what the speaker model expects
+SAMPLE_RATE = VAD_RATE  # 16 kHz: what the speaker model and the speech detector expect
 WINDOW_S = 6.0  # voice drift: similarity of the first vs the last window of all.wav
 
 
@@ -62,7 +62,6 @@ def parse_args() -> argparse.Namespace:
 class Scorer:
     def __init__(self, asr_model: str, device: str) -> None:
         from faster_whisper import WhisperModel
-        from faster_whisper.vad import VadOptions, get_speech_timestamps
         from speechbrain.inference.speaker import EncoderClassifier
 
         compute_type = "float16" if device == "cuda" else "int8"
@@ -70,11 +69,7 @@ class Scorer:
         self.speaker = EncoderClassifier.from_hparams(
             "speechbrain/spkrec-ecapa-voxceleb", run_opts={"device": device}
         )
-        # Silero VAD as bundled with faster-whisper, with the settings of round 2.
-        self.detect_speech = get_speech_timestamps
-        self.vad_options = VadOptions(
-            threshold=0.5, min_speech_duration_ms=250, min_silence_duration_ms=100, speech_pad_ms=30
-        )
+        self.vad = SpeechDetector()
 
     def transcribe(self, path: Path, lang: str) -> str:
         segments, _ = self.asr.transcribe(str(path), language=lang, beam_size=5)
@@ -92,9 +87,7 @@ class Scorer:
 
     def nonspeech_edges(self, wav: torch.Tensor) -> tuple[float, float]:
         """Seconds of non-speech before the first and after the last speech."""
-        samples = wav[0].numpy()
-        speech = self.detect_speech(samples, self.vad_options)
-        return edge_nonspeech([(s["start"], s["end"]) for s in speech], len(samples), SAMPLE_RATE)
+        return self.vad.edges(wav[0].numpy())
 
     def similarity(self, a: torch.Tensor, b: torch.Tensor) -> float:
         return torch.nn.functional.cosine_similarity(a, b, dim=0).item()

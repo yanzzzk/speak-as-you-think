@@ -22,9 +22,9 @@ import soundfile as sf
 import torch
 import torchaudio
 
-from speak_as_you_think.seams import edge_nonspeech, seam_rows
+from speak_as_you_think.seams import VAD_RATE, SpeechDetector, edge_nonspeech, seam_rows
 
-SAMPLE_RATE = 16000  # what the VAD expects
+SAMPLE_RATE = VAD_RATE
 MID_SENTENCE = ("word", "clause")
 # Listening section, in page order: text id -> (first chunk, number of chunks). Every
 # passage ends at a sentence end; two open a reply and one comes from the middle of one.
@@ -43,22 +43,17 @@ def parse_args() -> argparse.Namespace:
 
 
 class Vad:
-    """Silero VAD as bundled with faster-whisper, with the settings of week1_score.py."""
+    """The speech detector of week1_score.py, run on a chunk's wav file."""
 
     def __init__(self) -> None:
-        from faster_whisper.vad import VadOptions, get_speech_timestamps
-
-        self.detect = get_speech_timestamps
-        self.options = VadOptions(
-            threshold=0.5, min_speech_duration_ms=250, min_silence_duration_ms=100, speech_pad_ms=30
-        )
+        self.detector = SpeechDetector()
 
     def speech(self, path: Path) -> tuple[list[tuple[int, int]], int]:
         """Speech segments as sample indices at SAMPLE_RATE, and the clip length."""
         samples, sr = sf.read(path, dtype="float32", always_2d=True)
         wav = torch.from_numpy(samples).mean(dim=1).unsqueeze(0)
         wav = torchaudio.functional.resample(wav, sr, SAMPLE_RATE)[0].numpy()
-        return [(s["start"], s["end"]) for s in self.detect(wav, self.options)], len(wav)
+        return self.detector.segments(wav), len(wav)
 
 
 def read_csv(path: Path) -> list[dict]:

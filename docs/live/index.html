@@ -1,0 +1,1911 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<title>Speak as you think: live demo</title>
+<meta name="description" content="Live demo v0: a reply is sent to a speech model a few characters at a time and spoken chunk by chunk, three ways. The gap at each cut is measured, and the reply can be interrupted.">
+<style>
+/* ------------------------------------------------------------------
+   System
+   One family. Surfaces: page, alternate band, panel on the page, card on the band, well inside a card.
+   Chrome is ink and grey only; colour belongs to the data.
+   Radii: 28 (panels and cards), 22 (segments), 18 (wells), pills for controls.
+   Space: 4 8 12 16 20 28 36 48, and one section step (--sec) above and below every section.
+   ------------------------------------------------------------------ */
+:root {
+  color-scheme: light dark;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+
+  --bg: #ffffff; --band: #f5f5f7; --panel: #f5f5f7; --card: #ffffff; --inset: #f5f5f7;
+  --tray: #e8e8ed; --thumb: #ffffff;
+  --nav: rgba(255, 255, 255, .72); --nav-solid: rgba(255, 255, 255, .96);
+
+  --ink: #1d1d1f; --muted: #6e6e73; --muted-tray: #606065; --ghost: #b7b7bc;
+  --line: rgba(0, 0, 0, .08); --line-2: rgba(0, 0, 0, .16);
+  --fill: rgba(0, 0, 0, .05); --fill-2: rgba(0, 0, 0, .09);
+
+  /* Data: one colour per way, orange for a gap at a mid-phrase cut, grey for a pause at punctuation, red for stalls, interruption and errors. */
+  --ind: #515155; --last: #5856d6; --stream: #007d6f;
+  --gap: #e85d00; --gap-text: #bf4800; --rest: #a0a0a5; --warn: #d70015; --on-c: #ffffff;
+  --c: var(--ind);
+
+  --lift: 0 0 0 .5px rgba(0, 0, 0, .04), 0 3px 10px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
+  --stage-shadow: 0 28px 56px -36px rgba(0, 0, 0, .2);
+  --footer-line: transparent;
+
+  --wrap: 1120px; --gutter: 40px; --nav-h: 48px; --sec: 88px;
+  --r-xl: 28px; --r-md: 18px; --r-sm: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000; --band: #000000; --panel: #1d1d1f; --card: #1d1d1f; --inset: #2a2a2d;
+    --tray: #1d1d1f; --thumb: #333336;
+    --nav: rgba(0, 0, 0, .72); --nav-solid: rgba(0, 0, 0, .96);
+
+    --ink: #f5f5f7; --muted: #a1a1a6; --muted-tray: #a1a1a6; --ghost: #56565b;
+    --line: rgba(255, 255, 255, .1); --line-2: rgba(255, 255, 255, .22);
+    --fill: rgba(255, 255, 255, .08); --fill-2: rgba(255, 255, 255, .13);
+
+    --ind: #a8a8ad; --last: #8a87ff; --stream: #5ddcc4;
+    --gap: #ff9f0a; --gap-text: #ff9f0a; --rest: #636368; --warn: #ff6961; --on-c: #000000;
+
+    --lift: 0 0 0 .5px rgba(255, 255, 255, .06), 0 3px 10px rgba(0, 0, 0, .4);
+    --stage-shadow: none;
+    --footer-line: var(--line);
+  }
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: calc(var(--nav-h) + 24px); }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 400 17px/1.47 var(--font); letter-spacing: -0.012em;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility;
+}
+main { overflow-x: clip; }
+h1, h2, h3, p { margin: 0; }
+b, strong { font-weight: 600; }
+a {
+  color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .18em;
+  text-decoration-color: color-mix(in srgb, currentColor 38%, transparent); transition: text-decoration-color .2s ease;
+}
+a:hover { text-decoration-color: currentColor; }
+button { font: inherit; letter-spacing: inherit; color: inherit; cursor: pointer; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+a:focus-visible { border-radius: 4px; }
+::selection { background: color-mix(in srgb, var(--ink) 16%, transparent); }
+
+.muted { color: var(--muted); }
+.small { font-size: 14px; line-height: 1.45; }
+.num { font-variant-numeric: tabular-nums; }
+.label { margin: 0; font-size: 14px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+
+.wrap { max-width: calc(var(--wrap) + 2 * var(--gutter)); margin-inline: auto; padding-inline: var(--gutter); }
+.sec { padding-block: var(--sec); }
+.band { background: var(--band); }
+
+h1 { max-width: 13.2em; font-size: clamp(38px, 6.6vw, 80px); line-height: 1.05; font-weight: 600; letter-spacing: -0.022em; text-wrap: balance; }
+h2 { max-width: 20em; font-size: clamp(30px, 4.3vw, 48px); line-height: 1.08; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
+h3 { font-size: 24px; line-height: 1.17; font-weight: 600; letter-spacing: -0.018em; }
+.sub { max-width: 36em; margin-top: 14px; font-size: clamp(17px, .45vw + 15.3px, 21px); line-height: 1.4; color: var(--muted); text-wrap: pretty; }
+
+/* Pill buttons: ink, never a data colour. */
+.cta, .btn, .topbar-cta {
+  display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 999px;
+  background: var(--ink); color: var(--bg); font-weight: 500; text-decoration: none; white-space: nowrap;
+  transition: background-color .2s ease, color .2s ease, box-shadow .2s ease, transform .2s ease, opacity .2s ease;
+}
+.cta:hover, .btn:hover:not(:disabled), .topbar-cta:hover { background: color-mix(in srgb, var(--ink) 84%, var(--bg)); }
+.cta:active, .btn:active:not(:disabled), .topbar-cta:active { transform: scale(.97); }
+
+/* ---------- top bar ---------- */
+.topbar { position: sticky; top: 0; z-index: 20; height: var(--nav-h); background: var(--nav-solid); border-bottom: 1px solid var(--line); }
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .topbar { background: var(--nav); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }
+}
+.topbar-in { display: flex; align-items: center; gap: 28px; height: 100%; }
+.topbar-name { margin-right: auto; font-size: 19px; font-weight: 600; letter-spacing: -0.02em; text-decoration: none; white-space: nowrap; }
+.topbar-links { display: flex; align-items: center; gap: 28px; }
+.topbar-links a { padding: 6px 0; font-size: 13px; letter-spacing: -0.005em; color: var(--muted); text-decoration: none; white-space: nowrap; transition: color .2s ease; }
+.topbar-links a:hover { color: var(--ink); }
+.topbar-links a:active { opacity: .6; }
+.topbar-cta { position: relative; height: 30px; padding: 0 14px; font-size: 13px; letter-spacing: -0.005em; }
+.topbar-cta::after { content: ""; position: absolute; inset: -9px -6px; }
+
+/* ---------- intro ---------- */
+.intro { padding: clamp(56px, 8.4vw, 112px) 0 var(--sec); }
+.eyebrow { margin-bottom: 14px; font-size: 15px; line-height: 1.35; font-weight: 600; letter-spacing: -0.01em; color: var(--muted); }
+.lead { max-width: 33em; margin-top: clamp(20px, 2.4vw, 30px); font-size: clamp(19px, .6vw + 16.6px, 24px); line-height: 1.4; letter-spacing: -0.014em; color: var(--muted); text-wrap: pretty; }
+.intro-cta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; max-width: 46em; margin-top: clamp(26px, 3vw, 38px); font-size: 17px; line-height: 1.4; color: var(--muted); }
+.intro-cta span { flex: 1 1 16em; min-width: 0; }
+.cta { gap: 10px; height: 50px; padding: 0 26px; font-size: 17px; letter-spacing: -0.015em; }
+.cta svg { flex: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; transition: transform .3s ease; }
+.cta:hover svg { transform: translateY(2px); }
+
+/* The figure: the same row of chunks three times. Speech is tall, the gap at a cut is low and orange.
+   Gap widths are in proportion to the three experiment medians; the chunk lengths are illustrative. */
+.fig { --dom: calc(8 + 5 * .45); margin-top: clamp(48px, 7vw, 96px); padding: clamp(24px, 4.6vw, 56px); border-radius: var(--r-xl); background: var(--panel); }
+.fig-cap { font-size: 14px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; color: var(--muted); }
+.fig-rows { display: grid; gap: clamp(26px, 3.2vw, 40px); margin-top: clamp(24px, 3.4vw, 44px); }
+.fig-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 12px 24px; }
+.fig-row.w1 { --c: var(--ind); --g: .45; }
+.fig-row.w2 { --c: var(--last); --g: .25; }
+.fig-row.w3 { --c: var(--stream); --g: .14; }
+.fig-name { font-size: 17px; line-height: 1.25; font-weight: 600; letter-spacing: -0.015em; }
+.fig-name::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 10px; border-radius: 3px; background: var(--c); }
+.fig-strip { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; min-width: 0; height: 48px; background: linear-gradient(var(--fill-2), var(--fill-2)) left center / 100% 2px no-repeat; }
+.fig-strip i { display: block; flex: none; }
+.fig-strip i:nth-child(odd) { width: calc(var(--d) / var(--dom) * 100%); height: 100%; border-radius: 10px; background: var(--c); }
+.fig-strip i:nth-child(even) { width: calc(var(--g) / var(--dom) * 100%); height: 12px; border-radius: 3px; background: var(--gap); }
+.fig-strip i:nth-child(1) { --d: 1.5; }
+.fig-strip i:nth-child(3) { --d: 1; }
+.fig-strip i:nth-child(5) { --d: 1.8; }
+.fig-strip i:nth-child(7) { --d: 1.2; }
+.fig-strip i:nth-child(9) { --d: 1.6; }
+.fig-strip i:nth-child(11) { --d: .9; }
+.fig-num { text-align: right; font-size: clamp(24px, 3.2vw, 40px); line-height: 1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.fig-num small { margin-left: .16em; font-size: .5em; font-weight: 500; letter-spacing: 0; color: var(--muted); }
+
+/* ---------- how it works ---------- */
+.how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px clamp(28px, 4.4vw, 64px); }
+.how .n { display: block; font-size: 44px; line-height: 1; font-weight: 600; letter-spacing: -0.03em; color: var(--muted); font-variant-numeric: tabular-nums; }
+.how h3 { margin-top: 18px; }
+.how p { margin-top: 8px; color: var(--muted); text-wrap: pretty; }
+.banner { margin-top: 48px; padding: 18px 22px; border-radius: var(--r-md); background: var(--panel); box-shadow: inset 0 0 0 1px var(--line-2); font-size: 15px; line-height: 1.45; }
+
+/* ---------- three ways: one tray, three segments ---------- */
+#modes {
+  --muted: var(--muted-tray);
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0 6px;
+  min-width: 0; margin: 40px 0 0; padding: 6px; border: 0; border-radius: var(--r-xl); background: var(--tray);
+}
+.mode {
+  --c: var(--ind);
+  position: relative; display: block; padding: 22px 22px 20px; border-radius: calc(var(--r-xl) - 6px); cursor: pointer;
+  transition: background-color .28s ease, box-shadow .28s ease, opacity .28s ease, transform .2s ease;
+}
+.mode input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.mode:hover:not(:has(input:checked)):not(:has(input:disabled)) { background: color-mix(in srgb, var(--thumb) 50%, transparent); }
+.mode:active:not(:has(input:disabled)) { transform: scale(.992); }
+.mode:has(input:checked) { background: var(--thumb); box-shadow: var(--lift); }
+.mode:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; }
+.mode:has(input:disabled) { cursor: default; }
+.mode:has(input:disabled:not(:checked)) { opacity: .5; }
+.mode > span { display: block; }
+.mode .head { display: flex; align-items: center; align-self: start; gap: 10px; font-size: 19px; line-height: 1.2; font-weight: 600; letter-spacing: -0.018em; }
+.mode .step {
+  flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--c);
+  font-size: 13px; font-weight: 600; letter-spacing: 0; font-variant-numeric: tabular-nums; transition: background-color .28s ease, color .28s ease;
+}
+.mode:has(input:checked) .step { background: var(--c); color: var(--on-c); }
+.mode .tag { margin-left: auto; padding: 3px 9px; border-radius: 999px; background: var(--fill-2); font-size: 12px; line-height: 1.3; font-weight: 600; letter-spacing: 0; }
+.mode .blurb { min-height: 5.8em; margin-top: 12px; font-size: 15px; line-height: 1.45; color: var(--muted); }
+.mode .paper { margin-top: 10px; font-size: 13px; line-height: 1.4; color: var(--muted); }
+.mode .cap { margin-top: 20px; font-size: 13px; line-height: 1.4; font-weight: 600; }
+.mode .row { display: grid; grid-template-columns: 6.6em minmax(0, 1fr) 3.4em; align-items: center; gap: 10px; margin-top: 8px; font-size: 13.5px; line-height: 1.3; }
+.mode .row.live { margin-top: 6px; }
+.mode .row b { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mode .row .rail { height: 6px; border-radius: 3px; background: var(--fill-2); overflow: hidden; }
+.mode .row .rail i { display: block; height: 100%; border-radius: 3px; background: var(--c); }
+.mode .row.live .rail i { background: transparent; border: 1.5px solid var(--c); }
+.mode .row .none { color: var(--muted); font-weight: 400; }
+.mode .note { min-height: 1.4em; margin-top: 8px; font-size: 13px; line-height: 1.4; color: var(--muted); }
+@media (min-width: 861px) {
+  /* The same line of every card sits on the same row, whatever wraps. */
+  @supports (grid-template-rows: subgrid) {
+    #modes { grid-template-rows: repeat(7, auto); }
+    .mode { display: grid; grid-template-rows: subgrid; grid-row: span 7; }
+  }
+}
+@media (forced-colors: active) { .mode:has(input:checked) { outline: 2px solid Highlight; } }
+.fine { max-width: 62em; margin-top: 16px; text-wrap: pretty; }
+.fine a, .limits a, footer a { color: var(--ink); }
+
+/* ---------- stage ---------- */
+#stage { margin-top: 48px; background: var(--card); border-radius: var(--r-xl); box-shadow: var(--stage-shadow); }
+.transport {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px 16px;
+  min-height: 84px; padding: 18px 24px 18px 32px; border-bottom: 1px solid var(--line);
+}
+.pill { display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 32px; padding: 0 14px 0 12px; border-radius: 999px; background: var(--fill); font-size: 13px; font-weight: 500; letter-spacing: -0.005em; white-space: nowrap; }
+.pill i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.pill span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pill.ok i { background: var(--ink); }
+.pill.bad { color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.pill.bad i { background: var(--warn); }
+.pill.tones i { background: transparent; box-shadow: inset 0 0 0 2px var(--ink); }
+.pill.wait i { animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+#status { min-width: 0; margin: 0; font-size: 15px; line-height: 1.4; }
+.btn { gap: 9px; height: 48px; padding: 0 24px; font-size: 17px; letter-spacing: -0.015em; }
+.btn svg { flex: none; width: 12px; height: 12px; fill: currentColor; }
+.btn:disabled { opacity: .3; cursor: default; }
+#speak { min-width: 164px; }
+.btn.stop { background: transparent; color: var(--warn); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 50%, transparent); }
+.btn.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.btn.stop:disabled { color: var(--muted); box-shadow: inset 0 0 0 1px var(--line-2); opacity: .6; }
+.btn.next { height: 44px; padding: 0 20px; font-size: 15px; background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.btn.next:hover:not(:disabled) { background: var(--fill); }
+kbd { padding: 3px 5px; border-radius: 5px; box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent); font: 500 11px/1 var(--font); letter-spacing: 0; }
+
+.region { position: relative; padding: 28px 32px 30px; }
+.region + .region::before { content: ""; position: absolute; top: 0; left: 32px; right: 32px; border-top: 1px solid var(--line); }
+.bar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+.bar-row .label { margin-right: 8px; }
+.bar-row .spacer { flex: 1; }
+.chip {
+  height: 40px; padding: 0 16px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 14px; font-weight: 500; letter-spacing: -0.01em; color: var(--ink);
+  transition: background-color .2s ease, box-shadow .2s ease, opacity .2s ease;
+}
+.chip:hover:not(:disabled) { background: var(--fill); }
+.chip:active:not(:disabled) { background: var(--fill-2); }
+.chip[aria-pressed="true"] { background: var(--fill); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.chip:disabled { opacity: .45; cursor: default; }
+.link {
+  min-height: 40px; padding: 0 2px; border: 0; background: none; font-size: 14px; color: var(--muted);
+  text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  transition: color .2s ease, text-decoration-color .2s ease;
+}
+.link:hover { color: var(--ink); text-decoration-color: currentColor; }
+.link:active { opacity: .6; }
+
+#edit { margin: 0 0 20px; padding: 20px; border-radius: var(--r-md); background: var(--inset); }
+textarea {
+  display: block; width: 100%; min-height: 120px; resize: vertical; margin-top: 8px; padding: 14px 16px;
+  border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--card); color: var(--ink);
+  font: inherit; font-size: 17px; line-height: 1.5; letter-spacing: inherit; transition: border-color .2s ease, box-shadow .2s ease;
+}
+textarea:hover:not(:disabled) { border-color: var(--muted); }
+textarea:focus-visible { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 16%, transparent); }
+textarea:disabled { opacity: .55; }
+#edit .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 14px; font-size: 14px; line-height: 1.4; color: var(--muted); }
+input[type=range] { width: 220px; max-width: 100%; height: 28px; margin: 0; accent-color: var(--ink); }
+input[type=range]:disabled { opacity: .45; }
+
+#cue { margin: 0 0 22px; max-width: 58em; font-size: 15px; line-height: 1.45; text-wrap: pretty; }
+#cue b { color: var(--c); }
+
+/* The reply: the text, a mark at each cut, the gap measured there. */
+#reply { max-width: 37em; min-height: 5.1em; margin: 0; font-size: clamp(20px, 1.1vw + 11px, 25px); line-height: 1.7; letter-spacing: -0.016em; overflow-wrap: anywhere; }
+#reply .idle, #reply .sent, #reply .ahead, #reply .unheard { color: var(--muted); }
+#reply .ghost { color: var(--ghost); }
+#reply .ck { border-radius: 6px; transition: background-color .18s ease, color .18s ease; }
+#reply .playing { margin: 0 -3px; padding: 2px 3px; background: color-mix(in srgb, var(--c) 16%, transparent); box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+#reply .look { text-decoration: underline dotted var(--c); text-decoration-thickness: 2px; text-underline-offset: 6px; }
+#reply .partly { text-decoration: underline dashed var(--warn); text-decoration-thickness: 2px; text-underline-offset: 6px; }
+#reply .before { color: var(--ink); }
+/* The mark is an empty inline box, not an inline-block: an inline-block would let the line break on either side of it. */
+.cut { display: inline; margin: 0 7px; padding-left: 3px; border-radius: 2px; background: var(--rest); font-size: .88em; }
+.cut.word { background: var(--gap); }
+.cut.resumed { background: var(--warn); }
+.gapnum { margin: 0 6px 0 -3px; vertical-align: .75em; font: 500 12px/0 var(--font); letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--muted); }
+.gapnum.word { color: var(--gap-text); font-weight: 600; }
+.gapnum.late, .heardtag { color: var(--warn); font-weight: 600; }
+.heardtag { margin-left: 6px; vertical-align: .75em; font: 600 12px/0 var(--font); letter-spacing: 0; }
+/* A mark never leaves the word before it, nor a gap number its mark: word joiners hold them together, and the line may break after the number. */
+#reply .ck::after, #reply .before::after, .heardtag::after, .gapnum::before { content: "\2060"; }
+.gapnum:not(:has(+ .gapnum))::after { content: "\200B"; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 26px 0 0; font-size: 13px; line-height: 1.4; color: var(--muted); }
+.legend i { display: inline-block; margin-right: 7px; vertical-align: -1px; }
+.legend .cut { width: 3px; height: 1.05em; margin: 0 8px 0 0; padding: 0; vertical-align: -0.16em; font-size: inherit; }
+.legend .sw { width: 22px; height: 10px; border-radius: 3px; }
+.legend .sw-speech { background: var(--c); }
+.legend .sw-gap { height: 6px; vertical-align: 1px; background: var(--gap); }
+.legend .sw-rest { height: 6px; vertical-align: 1px; background: var(--rest); }
+.legend .hatch, .stall { background: repeating-linear-gradient(135deg, var(--warn) 0 2px, transparent 2px 5px); }
+.lg-aa { font-weight: 500; }
+.lg-ghost { color: var(--ghost); }
+.lg-sent { color: var(--muted); }
+.lg-now { padding: 1px 4px; border-radius: 5px; background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--ink); }
+.lg-done { color: var(--ink); }
+.lg-look { color: var(--ink); text-decoration: underline dotted var(--c); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+
+/* ---------- timeline: three lanes on one clock ---------- */
+.tl-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 20px; margin: 0 0 14px; }
+.tl-head .legend { flex: 1; margin: 0; }
+#clock { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.rows-note { display: none; margin: 0 0 6px; }
+/* Lane heights in one place: the lane names and the playhead are placed from the same numbers. */
+.tl { --h-notes: 22px; --h-axis: 22px; --h-text: 28px; --h-gen: 34px; --h-play: 48px; --h-labels: 20px; position: relative; padding-left: 112px; }
+.tl .names { position: absolute; left: 0; top: calc(var(--h-notes) + var(--h-axis)); width: 104px; font-size: 13px; line-height: 1.2; font-weight: 500; }
+.tl .names span { display: flex; align-items: center; }
+.tl .names .a { height: var(--h-text); } .tl .names .b { height: var(--h-gen); } .tl .names .c { height: var(--h-play); }
+#plot { position: relative; --dom: 12; }
+#plot > div { position: relative; }
+.bar, .at { position: absolute; left: calc(var(--t) / var(--dom) * 100%); }
+.bar { width: calc(var(--d) / var(--dom) * 100%); transition: left .24s, width .24s; }
+.bar.now { transition: none; }
+#tl-notes { height: var(--h-notes); font-size: 12px; line-height: 18px; color: var(--muted); }
+#tl-notes .first { top: 12px; height: 0; border-top: 1px solid var(--muted); }
+#tl-notes .first::before, #tl-notes .first::after { content: ""; position: absolute; top: -4px; height: 7px; border-left: 1px solid var(--muted); }
+#tl-notes .first::before { left: 0; } #tl-notes .first::after { right: 0; }
+#tl-notes .first span { position: absolute; left: 5px; top: -10px; padding: 0 5px; background: var(--card); white-space: nowrap; }
+#tl-notes .flag { top: 2px; z-index: 3; padding: 0 7px; border-radius: 6px; background: var(--card); box-shadow: inset 0 0 0 1px var(--warn); font-weight: 600; color: var(--warn); white-space: nowrap; transform: translateX(6px); }
+#tl-notes .flag.left { transform: translateX(calc(-100% - 6px)); }
+#tl-axis { height: var(--h-axis); border-bottom: 1px solid var(--line-2); font-size: 12px; line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
+#tl-axis .at { bottom: 0; height: 4px; border-left: 1px solid var(--line-2); }
+#tl-axis .at.major { height: 8px; border-left-color: var(--muted); }
+#tl-axis .at span { position: absolute; bottom: 8px; left: 4px; }
+#tl-text { height: var(--h-text); border-bottom: 1px solid var(--line); }
+#tl-text .sent { top: 10px; height: 8px; border-radius: 4px; background: var(--ghost); }
+#tl-text .at { top: 6px; height: 16px; border-left: 1.5px solid var(--card); }
+#tl-text .at.end { border-left: 1.5px solid var(--ink); font-size: 12px; line-height: 16px; color: var(--muted); }
+#tl-text .at.end span { position: absolute; left: 6px; top: 0; white-space: nowrap; }
+#tl-gen { height: var(--h-gen); border-bottom: 1px solid var(--line); }
+#tl-gen .bar {
+  top: 8px; height: 18px; border: 1px solid var(--c); border-radius: 5px; background: color-mix(in srgb, var(--c) 18%, var(--card));
+  font: 500 11.5px/16px var(--font); letter-spacing: 0; font-variant-numeric: tabular-nums; text-align: center; overflow: hidden; white-space: nowrap;
+}
+#tl-gen .bar.pending { border: 1px dashed var(--muted); background: transparent; }
+#tl-play { height: var(--h-play); }
+.pc { top: 8px; height: 32px; display: flex; align-items: center; }
+.pc .edge { flex: none; height: 10px; min-width: 1.5px; border-radius: 3px; background: color-mix(in srgb, var(--c) 32%, var(--card)); }
+.pc .edge.word { background: var(--gap); }
+.pc .edge.rest { background: var(--rest); }
+.pc .sp {
+  flex: 1; min-width: 1px; height: 32px; padding-left: 6px; border-radius: 6px; background: var(--c); color: var(--on-c); overflow: hidden;
+  font: 600 12px/32px var(--font); letter-spacing: 0; font-variant-numeric: tabular-nums;
+}
+.pc.unheard .sp { background: transparent; border: 1px dashed var(--c); color: transparent; }
+.pc.nospeech .sp { height: 10px; line-height: 10px; color: transparent; background: var(--rest); }
+#tl-play .stall { top: 8px; height: 32px; min-width: 3px; border-radius: 3px; }
+#veil { position: absolute; top: 0; bottom: 0; right: 0; background: var(--card); opacity: .6; pointer-events: none; }
+#playhead { position: absolute !important; top: calc(var(--h-notes) + var(--h-axis)); bottom: var(--h-labels); z-index: 2; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink); pointer-events: none; }
+#playhead::before { content: ""; position: absolute; top: -4px; left: -3px; width: 8px; height: 8px; border-radius: 50%; background: inherit; }
+#playhead.stopped { background: var(--warn); }
+#tl-labels { height: var(--h-labels); font-size: 12px; line-height: 1.3; font-variant-numeric: tabular-nums; color: var(--muted); }
+#tl-labels .at { top: 3px; transform: translateX(-50%); white-space: nowrap; }
+#tl-labels .word { color: var(--gap-text); font-weight: 600; }
+#tl-labels .stalled { color: var(--warn); font-weight: 600; }
+#tl-labels .hide { visibility: hidden; }
+#tl-empty {
+  position: absolute !important; left: 50%; top: calc(var(--h-notes) + var(--h-axis) + (var(--h-text) + var(--h-gen) + var(--h-play)) / 2); transform: translate(-50%, -50%);
+  width: max-content; max-width: 100%; margin: 0; padding: 4px 14px; background: var(--card); text-align: center; font-size: 14px; line-height: 1.4; color: var(--muted);
+}
+.outcome { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; min-height: 84px; padding-block: 18px; }
+#outcome { flex: 1; min-width: 16em; margin: 0; font-size: 15px; line-height: 1.45; }
+
+/* ---------- this run in numbers ---------- */
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 20px; }
+.tile { padding: 32px 36px 34px; background: var(--card); border-radius: var(--r-xl); }
+.tile .label { font-size: 15px; }
+.tile .value { margin-top: 10px; font-size: clamp(48px, 5.4vw, 72px); line-height: 1.05; font-weight: 600; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; }
+.tile .value small { margin-left: .14em; font-size: .3em; font-weight: 500; letter-spacing: -0.01em; color: var(--muted); }
+.tile.hero .value { color: var(--gap-text); }
+.tile .chart { position: relative; height: 16px; margin: 18px 0 10px; }
+.tile .chart::before { content: ""; position: absolute; left: 0; right: 0; top: 5px; height: 6px; border-radius: 3px; background: var(--fill-2); }
+#stall-chart::before { display: none; }
+.tile .chart .dot { position: absolute; top: 5px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--gap); opacity: .8; }
+.tile .chart .tick { position: absolute; top: 0; width: 2px; height: 16px; margin-left: -1px; border-radius: 1px; background: var(--ink); }
+.tile .chart .tick.off { border-left: 2px dotted var(--ink); border-radius: 0; background: none; }
+.tile .ends { display: flex; justify-content: space-between; margin: -6px 0 8px; font-size: 12px; line-height: 1.3; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tile .chart .seg, .tile .chart .fill { position: absolute; top: 5px; height: 6px; }
+.tile .chart .fill { left: 0; border-radius: 3px; background: var(--c); }
+.tile .chart .seg.a { background: var(--ghost); border-radius: 3px 0 0 3px; }
+.tile .chart .seg.b { background: var(--c); }
+.tile .chart .seg.d { background: var(--rest); border-radius: 0 3px 3px 0; }
+.tile .detail { min-height: 1.45em; margin: 0; font-size: 14px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+.tile .def { max-width: 40em; margin: 8px 0 0; font-size: 14px; line-height: 1.45; color: var(--muted); text-wrap: pretty; }
+
+/* ---------- what the listener heard ---------- */
+#report { margin-top: 20px; padding: 36px 40px 38px; background: var(--card); border-radius: var(--r-xl); }
+#report h3 { margin: 0 0 10px; }
+#report > p { max-width: 48em; margin: 0 0 14px; text-wrap: pretty; }
+#report > p:last-child { margin-bottom: 0; }
+#report dl { display: grid; grid-template-columns: 12em minmax(0, 1fr); margin: 22px 0; }
+#report dt, #report dd { margin: 0; padding: 14px 0; border-top: 1px solid var(--line); }
+#report dt { font-size: 14px; line-height: 1.75; font-weight: 600; color: var(--muted); }
+#report dd q { font-weight: 500; quotes: "“" "”"; }
+#report .kept { max-width: none; margin: 0 0 16px; padding: 20px 24px 22px; border-radius: var(--r-md); background: var(--inset); }
+#report .kept .label { display: inline-block; margin-bottom: 6px; color: var(--muted); }
+#report .kept q { font-size: 21px; line-height: 1.4; font-weight: 500; letter-spacing: -0.016em; quotes: "“" "”"; }
+
+/* ---------- tables ---------- */
+.sheet { margin-top: 36px; padding: 6px 12px; border-radius: var(--r-xl); background: var(--panel); }
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.4; font-variant-numeric: tabular-nums; }
+th, td { padding: 14px; text-align: left; vertical-align: top; }
+th { border-bottom: 1px solid var(--line); font-size: 12.5px; font-weight: 600; letter-spacing: 0; color: var(--muted); white-space: nowrap; }
+td.r, th.r { text-align: right; }
+td.r { white-space: nowrap; }
+td small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted); white-space: normal; }
+tr.run td { border-top: 1px solid var(--line); }
+tr.run:first-child td { border-top: 0; }
+tr.strip td { padding: 0 14px 16px; }
+#runs { min-width: 800px; }
+#chunks table { min-width: 760px; }
+.mini { position: relative; height: 18px; border-radius: 5px; background: var(--fill-2); overflow: hidden; --dom: 30; }
+.mini .pc { top: 0; height: 18px; }
+.mini .pc .sp { height: 18px; border-radius: 3px; color: transparent; }
+.mini .pc .edge { height: 6px; border-radius: 2px; }
+.mini .stall { position: absolute; top: 0; height: 18px; }
+.mini .cutoff { top: 0; height: 18px; border-left: 2px solid var(--warn); background: color-mix(in srgb, var(--panel) 72%, transparent); }
+.sw-dot { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 3px; background: var(--c); }
+.empty { margin: 0; padding: 44px 20px; text-align: center; font-size: 15px; color: var(--muted); }
+#compare { max-width: 62em; margin: 22px 0 0; font-size: 15px; line-height: 1.5; }
+
+/* ---------- disclosures ---------- */
+.fold { margin-top: 16px; border-radius: calc(var(--r-xl) - 6px); background: var(--panel); }
+.fold > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; padding: 0 28px;
+  border-radius: inherit; list-style: none; cursor: pointer; font-size: 17px; font-weight: 600; letter-spacing: -0.014em;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::after {
+  content: ""; flex: none; width: 9px; height: 9px; margin-right: 4px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  opacity: .55; transform: translateY(-3px) rotate(45deg); transition: transform .3s ease, opacity .2s ease;
+}
+.fold > summary:hover::after { opacity: 1; }
+.fold[open] > summary::after { transform: translateY(2px) rotate(-135deg); }
+.fold > .scroll { padding: 0 12px 18px; }
+.fold .note { margin: 0; padding: 10px 14px 0; max-width: 70em; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.fold ul { margin: 0; padding: 2px 32px 24px 48px; max-width: 64em; font-size: 15px; line-height: 1.5; color: var(--muted); }
+.fold li { margin: 0 0 10px; }
+.fold li b { color: var(--ink); }
+
+/* ---------- limits ---------- */
+.limits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 44px clamp(32px, 6vw, 88px); margin-top: 52px; }
+.limits p { color: var(--muted); text-wrap: pretty; }
+.limits p b { display: block; margin-bottom: 6px; font-size: 21px; line-height: 1.25; letter-spacing: -0.016em; color: var(--ink); }
+.limits + .fold { margin-top: 64px; }
+
+/* ---------- footer ---------- */
+footer { padding: 40px 0 56px; border-top: 1px solid var(--footer-line); background: var(--band); font-size: 13px; line-height: 1.5; color: var(--muted); }
+footer p { max-width: 70em; margin: 0 0 8px; }
+footer p:last-child { margin: 16px 0 0; }
+
+/* ---------- narrower ---------- */
+@media (min-width: 761px) and (max-width: 1000px) {
+  .transport { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .transport .pill { justify-self: start; max-width: 100%; }
+  #status { grid-column: 1 / -1; grid-row: 2; }
+}
+@media (max-width: 860px) {
+  #modes { grid-auto-flow: row; gap: 6px; }
+  .mode .blurb { min-height: 0; }
+}
+@media (max-width: 760px) {
+  :root { --gutter: 20px; --sec: 52px; --r-xl: 22px; --r-md: 16px; }
+  .topbar-links { display: none; }
+  .topbar-name { font-size: 17px; }
+
+  .fig-row { gap: 10px 16px; }
+  .fig-name { font-size: 15px; }
+  .fig-strip { height: 36px; }
+  .fig-strip i:nth-child(odd) { border-radius: 8px; }
+  .fig-strip i:nth-child(even) { height: 10px; }
+
+  .how, .limits { grid-template-columns: minmax(0, 1fr); }
+  .how { gap: 36px; }
+  .how .n { font-size: 36px; }
+  .limits { gap: 32px; margin-top: 36px; }
+  .banner { margin-top: 36px; }
+
+  #modes { margin-top: 28px; }
+  .mode { padding: 18px 18px 16px; }
+
+  #stage { margin-top: 32px; }
+  /* The transport stays in reach: it sticks to the top and covers the top bar while the stage is on screen. */
+  .transport {
+    position: sticky; top: 0; z-index: 30; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 10px;
+    min-height: 0; padding: 12px 14px; background: var(--card); border-radius: var(--r-xl) var(--r-xl) 0 0;
+  }
+  .transport .pill { grid-column: 1 / -1; justify-self: start; max-width: 100%; height: 28px; overflow: hidden; }
+  #status { grid-column: 1 / -1; grid-row: 2; font-size: 14px; }
+  .transport .btn, #speak { grid-row: 3; min-width: 0; height: 46px; padding: 0 12px; }
+  kbd { display: none; }
+  .region { padding: 22px 18px 24px; }
+  .region + .region::before { left: 18px; right: 18px; }
+  .outcome { min-height: 0; padding-block: 18px; }
+  .tl-head .legend { flex: 1 1 100%; }
+  .tl { padding-left: 0; }
+  .tl .names { display: none; }
+  .rows-note { display: block; }
+  #tl-empty { font-size: 13px; }
+
+  .tiles { gap: 12px; margin-top: 12px; }
+  .tile { padding: 24px 22px 26px; }
+  #report { margin-top: 12px; padding: 26px 22px 28px; }
+  #report dl { grid-template-columns: minmax(0, 1fr); }
+  #report dt { padding-bottom: 2px; }
+  #report dd { padding-top: 0; border-top: 0; }
+  #report .kept { padding: 16px 18px 18px; }
+  #report .kept q { font-size: 19px; }
+
+  .sheet { margin-top: 28px; padding: 4px 6px; }
+  .fold > summary { min-height: 56px; padding: 0 20px; }
+  .fold > .scroll { padding: 0 6px 14px; }
+  .fold ul { padding: 2px 20px 20px 38px; }
+  .limits + .fold { margin-top: 44px; }
+  footer { padding: 32px 0 44px; }
+}
+@media (max-width: 640px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<nav class="topbar" aria-label="On this page">
+  <div class="wrap topbar-in">
+    <a class="topbar-name" href="#top">Speak as you think</a>
+    <div class="topbar-links">
+      <a href="#how">How it works</a>
+      <a href="#ways">Three ways</a>
+      <a href="#session">Runs</a>
+      <a href="#limits">Limits</a>
+    </div>
+    <a class="topbar-cta" href="#stage">Try it</a>
+  </div>
+</nav>
+
+<main>
+<header class="intro">
+  <div class="wrap">
+    <p class="eyebrow">Speak as you think · Live demo v0 · Built with Fish Audio</p>
+    <h1>One reply, spoken a few words at a time, three ways</h1>
+    <p class="dek lead">To start talking sooner, a voice assistant speaks before its language model has finished the sentence. So the reply is spoken in chunks of a few words, as they are written. Where a chunk ends in the middle of a phrase, the voice tends to leave a short gap. This page speaks one reply live, in three ways, measures that gap, and lets you interrupt.</p>
+    <p class="dek intro-cta"><a class="cta" href="#stage">Press Speak below<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5v9M2.2 6.8 6 10.5l3.8-3.7"/></svg></a><span> and listen for the gap at each orange mark, then try the next way.</span></p>
+
+    <div class="fig" aria-hidden="true">
+      <p class="fig-cap">Experiments · median gap at mid-phrase cuts</p>
+      <div class="fig-rows">
+        <div class="fig-row w1">
+          <span class="fig-name">One chunk at a time</span>
+          <span class="fig-strip"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="fig-num">0.45<small>s</small></span>
+        </div>
+        <div class="fig-row w2">
+          <span class="fig-name">Lookahead, short memory</span>
+          <span class="fig-strip"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="fig-num">0.25<small>s</small></span>
+        </div>
+        <div class="fig-row w3">
+          <span class="fig-name">Lookahead, full memory</span>
+          <span class="fig-strip"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="fig-num">0.14<small>s</small></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="sec" id="how" aria-label="What happens when you press Speak">
+  <div class="wrap">
+    <div class="how">
+      <div><span class="n">1</span><h3>Text arrives</h3><p>The page sends the reply to the server a few characters at a time, the way a language model writes it. No language model is running: the text is the one shown below.</p></div>
+      <div><span class="n">2</span><h3>Generate</h3><p>The server cuts the text into chunks of a few words<span id="step-size"></span> and turns each one into speech, in one cloned voice on one GPU. With lookahead, the model is also shown the next chunk, so it can tell that the phrase goes on.</p></div>
+      <div><span class="n">3</span><h3>Play</h3><p>The browser plays the chunks back to back and the gap at each cut is measured. Interrupt at any point: playback stops at once and the server reports what was heard.</p></div>
+    </div>
+    <p class="banner" id="banner" role="note" hidden><b>Stand-in mode.</b> The server is running without the voice model and plays a tone for each chunk. Timing and interruption work as usual. Every cut has the same fixed silence in all three ways, so they sound alike here; the gap numbers describe tones, not speech, and are not compared with the experiments.</p>
+    <p class="banner" id="replay-note" role="note" hidden></p>
+  </div>
+</section>
+
+<section class="sec band" id="ways">
+  <div class="wrap">
+    <h2 id="h-modes">Three ways to speak a chunk</h2>
+    <p class="sub">Try them in order on the same reply. The cuts fall in the same places each time; what changes is what the model is given.</p>
+    <fieldset id="modes" aria-labelledby="h-modes"></fieldset>
+    <p class="small muted fine">Gap: seconds without speech where one chunk ends in the middle of a phrase and the next begins. The experiment figures are medians over 138 such cuts per way (3 seeds, English, one cloned voice), from the <a href="https://yanzzzk.github.io/speak-as-you-think/">results page</a>. A run here has only a handful of cuts, so its number moves from run to run.</p>
+
+    <section class="card" id="stage" aria-label="The reply, live">
+      <div class="transport">
+        <span class="pill wait" id="pill"><i></i><span>Connecting…</span></span>
+        <p id="status" role="status" aria-live="polite">Connecting to the speech server…</p>
+        <button class="btn stop" id="interrupt" type="button" disabled><svg viewBox="0 0 12 12" aria-hidden="true"><rect width="12" height="12" rx="2"/></svg>Interrupt <kbd>Esc</kbd></button>
+        <button class="btn" id="speak" type="button" disabled><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 0.6v10.8L11.4 6z"/></svg><span>Speak</span></button>
+      </div>
+
+      <div class="region">
+        <div class="bar-row">
+          <span class="label">The reply</span>
+          <span id="presets" style="display:contents"></span>
+          <span class="spacer"></span>
+          <button class="link" id="edit-toggle" type="button" aria-expanded="false" aria-controls="edit">Edit the reply and the text speed</button>
+        </div>
+        <div id="edit" hidden>
+          <label class="label" for="text">Reply to speak</label>
+          <textarea id="text"></textarea>
+          <div class="controls">
+            <label for="speed">Text speed</label>
+            <input id="speed" type="range" min="20" max="400" step="20" value="80">
+            <output id="speed-value" class="num" style="color:var(--ink)">80 characters per second</output>
+            <span>How fast the text is sent to the server. <span id="count" class="num"></span></span>
+          </div>
+        </div>
+        <p id="cue"></p>
+        <p id="reply"></p>
+        <div class="legend" aria-hidden="true">
+          <span><span class="lg-aa lg-ghost">Aa</span> not sent yet</span>
+          <span><span class="lg-aa lg-sent">Aa</span> sent</span>
+          <span><span class="lg-aa lg-now">Aa</span> being spoken</span>
+          <span><span class="lg-aa lg-done">Aa</span> spoken</span>
+          <span id="lg-look"><span class="lg-aa lg-look">Aa</span> lookahead: the next chunk, shown to the model</span>
+          <span><i class="cut word"></i>cut mid-phrase, with its gap in seconds</span>
+          <span><i class="cut"></i>cut at a comma or full stop: a natural pause, not counted</span>
+        </div>
+      </div>
+
+      <div class="region">
+        <div class="tl-head">
+          <span class="label">One reply on one clock</span>
+          <div class="legend" aria-hidden="true">
+            <span><i class="sw sw-speech"></i>speech</span>
+            <span><i class="sw sw-gap"></i>gap at a mid-phrase cut</span>
+            <span><i class="sw sw-rest"></i>pause at punctuation</span>
+            <span id="lg-stall" hidden><i class="sw hatch"></i>stall: playback waited for the GPU</span>
+            <span>number in a Generate box: seconds to generate that chunk</span>
+          </div>
+          <span id="clock" aria-hidden="true"></span>
+        </div>
+        <p class="small muted rows-note">Rows, top to bottom: text arrives, generate, play.</p>
+        <div class="tl" id="timeline" role="img" aria-label="Timeline. Empty until a reply is spoken.">
+          <div class="names" aria-hidden="true"><span class="a">Text arrives</span><span class="b">Generate</span><span class="c">Play</span></div>
+          <div id="plot">
+            <div id="tl-notes"></div>
+            <div id="tl-axis"></div>
+            <div id="tl-text"></div>
+            <div id="tl-gen"></div>
+            <div id="tl-play"><div id="veil" hidden></div></div>
+            <div id="tl-labels"></div>
+            <div id="playhead" hidden></div>
+            <p id="tl-empty">The timeline fills in as text is sent, speech is generated and chunks are played. Seconds since Speak.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="region outcome">
+        <p id="outcome" aria-live="polite" class="muted">Nothing spoken yet.</p>
+        <button class="btn next" id="resume" type="button" hidden>Continue from where it stopped</button>
+        <button class="btn next" id="next" type="button" hidden></button>
+      </div>
+    </section>
+
+    <section class="tiles" aria-label="This run in numbers">
+      <div class="card tile hero">
+        <p class="label">Gap at mid-phrase cuts</p>
+        <p class="value" id="gap-value">–</p>
+        <div class="chart" id="gap-chart" aria-hidden="true"></div>
+        <div class="ends" aria-hidden="true"><span>0</span><span id="gap-scale">1 s</span></div>
+        <p class="detail" id="gap-detail"></p>
+        <p class="def">Seconds without speech where one chunk ends mid-phrase and the next begins. Shorter is better. A pause at a comma or full stop is natural, so those cuts are not counted.</p>
+      </div>
+      <div class="card tile">
+        <p class="label">Time to first audio</p>
+        <p class="value" id="first-value">–</p>
+        <div class="chart" id="first-chart" aria-hidden="true"></div>
+        <p class="detail" id="first-detail"></p>
+        <p class="def">From pressing Speak to the first chunk starting to play. Long in v0: it waits for the next chunk's text, in all three ways, and sends each chunk whole. Not an agent's response time: no speech recognition or language model is in the loop.</p>
+      </div>
+      <div class="card tile">
+        <p class="label">Generation speed</p>
+        <p class="value" id="speed-v">–</p>
+        <div class="chart" id="speed-chart" aria-hidden="true"></div>
+        <p class="detail" id="speed-detail"></p>
+        <p class="def">Seconds of audio made per second of generating. Above 1× the GPU stays ahead of playback.</p>
+      </div>
+      <div class="card tile">
+        <p class="label">Stalls</p>
+        <p class="value" id="stall-value">–</p>
+        <div class="chart" id="stall-chart" aria-hidden="true"></div>
+        <p class="detail" id="stall-detail"></p>
+        <p class="def">Times playback ran out of audio and waited for the next chunk. That silence is not in the audio and is never counted as a gap. The goal is 0.</p>
+      </div>
+    </section>
+
+    <section class="card" id="report" aria-live="polite">
+      <h3>What had the listener heard?</h3>
+      <p class="muted" style="margin:0">Press Interrupt while a reply is playing. Playback stops at once, and the server answers with the text heard in full, the chunk that was partly heard and how far into it, and the text it had received that was never played. A voice agent needs this report to tell its language model what the user actually heard.</p>
+    </section>
+  </div>
+</section>
+
+<section class="sec" id="session">
+  <div class="wrap">
+    <h2>Runs in this session</h2>
+    <p class="sub">Speak the same reply once in each way, then compare the rows. Each strip is that run's playback: tall blocks are speech, low orange blocks are gaps at mid-phrase cuts.</p>
+    <p id="compare" class="num" hidden></p>
+    <div class="card sheet scroll">
+      <table id="runs" hidden>
+        <thead><tr><th>Run</th><th>Way of speaking</th><th>Reply</th><th class="r">Gap, mid-phrase cuts</th><th class="r">First audio</th><th class="r">Speed</th><th class="r">Stalls</th><th>Ended</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="empty" id="runs-empty">No runs yet. Each run adds a row here, so the three ways can be compared.</p>
+    </div>
+
+    <details class="card fold" id="chunks">
+      <summary id="chunk-summary">Chunk by chunk</summary>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>#</th><th>Text</th><th>Ends</th><th class="r">Audio</th><th class="r">Generated in</th><th class="r">Gap after</th><th class="r">Waited</th><th class="r">Context</th><th>Note</th></tr></thead>
+          <tbody id="chunk-rows"><tr><td colspan="9" class="muted">No chunks yet.</td></tr></tbody>
+        </table>
+        <p class="note">Gap after: no speech at the end of this chunk plus no speech at the start of the next, found by a voice activity detector on the server: the measure of the experiments. Waited: time playback stalled before this chunk. Context: rows of text and audio the model read before speaking this chunk; it grows with memory.</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section class="sec" id="limits">
+  <div class="wrap">
+    <h2>What v0 does not do yet</h2>
+    <div class="card limits">
+      <p><b>First audio is late.</b> v0 waits for the next chunk's text and sends each chunk whole, so nothing plays until the first chunk is fully generated: about 2 to 3 s on one L40S at the default text speed.<span id="limit-first"></span> All three ways wait for the next chunk here, the baseline included, so first audio does not show what lookahead costs. Sending audio frame by frame, a fraction of a second at a time, is the next step.</p>
+      <p><b>Interruption is reported by chunk.</b> Playback stops at once and the server reports which chunks were heard, which one was partly heard and how far in, and which were never played. The model is not rolled back to the exact frame the listener heard.</p>
+      <p><b>A generation cannot be cancelled.</b> A chunk that is being generated when you interrupt is finished and thrown away, and the report waits for it.</p>
+      <p><b>The text is a script.</b> The reply is sent at a fixed speed to stand in for a language model. No language model, speech recogniser or microphone is connected, and Interrupt is a button.</p>
+      <p><b>Small scale.</b> One cloned voice, one GPU, one reply at a time, English.</p>
+      <p><b>Single runs.</b> A run here has a handful of cuts and repeats differ. The comparison between the three ways rests on the experiments on the <a href="https://yanzzzk.github.io/speak-as-you-think/">results page</a>.</p>
+    </div>
+
+    <details class="card fold">
+      <summary>How the numbers are computed</summary>
+      <ul>
+        <li><b>Replay:</b> where this page runs without a server, each run is a recording of the real model. Its chunks arrive at the times measured next to the server when it was recorded, so no network is in them, and the interruption report is worked out in the page by the server's rule. Every take that was recorded is played in turn.</li>
+        <li>Time is counted from the Speak click, on the browser's clock. Text is sent every <span id="send-ms"></span> ms, so text times have that resolution.</li>
+        <li><b>Gap or pause at a cut:</b> the non-speech at the end of one chunk's audio plus the non-speech at the start of the next, each found by a voice activity detector (Silero, the settings of the experiments) on that chunk's audio on the server. Pauses inside a chunk are not measured.</li>
+        <li><b>Time to first audio:</b> from Speak to the first sample scheduled to play. Its parts: waiting for text (until the first chunk, the chunk after it and the first <span id="min-chars">12</span> characters of the one after that had been sent: only then can the server start), generating (the server's own time for the first chunk), and queue and delivery (the rest: waiting behind another reply, network and scheduling; not measured directly). The delay of the audio device is not included.</li>
+        <li><b>Generation speed:</b> seconds of audio received divided by the server's seconds of generating, over the chunks of this run.</li>
+        <li><b>Stall:</b> the next chunk was scheduled later than the end of the one before it. Counted apart from gaps.</li>
+        <li><b>Generate lane:</b> each bar ends when the chunk's audio reached the browser and is as long as the server's generating time. The dashed bar means the next chunk has not been delivered yet.</li>
+        <li><b>Heard:</b> seconds of audio played when Interrupt was pressed, as the browser reports them to the server. The partly heard share is a share of that chunk's audio time, not of its words.</li>
+      </ul>
+    </details>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Built with Fish Audio. Drama 3 and fish-speech are under the <a href="https://github.com/fishaudio/fish-speech/blob/main/LICENSE">Fish Audio Community License, Version 1.0</a>; this is non-commercial research, not affiliated with or endorsed by Fish Audio.</p>
+    <p>The voice is my own, cloned with consent.</p>
+    <p id="provenance">Numbers on this page are measured in this session, except the experiment medians and the first-audio range under the limits, which say where they come from.</p>
+    <p>Yan Li · <a href="https://yanzzzk.github.io/speak-as-you-think/">results page with audio</a> · <a href="https://github.com/yanzzzk/speak-as-you-think">code</a></p>
+  </div>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+const s1 = (x) => x.toFixed(1), s2 = (x) => x.toFixed(2);
+const isNum = (x) => typeof x === "number" && isFinite(x);
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const median = (values) => {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b), mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+const SEND_MS = 40;      // how often text is sent
+const LEAD_S = 0.03;     // scheduling lead for the first chunk and after a stall
+const STALL_MIN = 0.005; // shorter gaps between scheduled chunks are rounding, not stalls
+const ACTIVE = ["waiting", "speaking", "draining", "stopping"];
+const ORDER = ["independent", "streaming-last", "streaming-all"];
+// offline: median non-speech at mid-phrase cuts in the experiments (138 cuts per mode, 3 seeds).
+const MODES = {
+  independent: {
+    name: "One chunk at a time", paper: "Independent chunks", color: "var(--ind)", offline: 0.45, tag: "baseline", lookahead: false,
+    blurb: "Each chunk is spoken on its own. The model does not know what comes next.",
+    cue: "Press Speak and listen for a short gap at each orange mark.",
+  },
+  "streaming-last": {
+    name: "Lookahead, short memory", paper: "Streaming, last round", color: "var(--last)", offline: 0.25, lookahead: true,
+    blurb: "The model is also shown the next chunk (the lookahead) and remembers the chunk before. The voice stays stable.",
+    cue: "Same text, same cuts: listen for shorter gaps at the orange marks. The first cut of the reply is the exception when it falls mid-phrase: in the experiments it stayed long.",
+  },
+  "streaming-all": {
+    name: "Lookahead, full memory", paper: "Streaming, all rounds", color: "var(--stream)", offline: 0.14, lookahead: true,
+    blurb: "Lookahead again, and the model remembers every chunk it has spoken. Shortest gaps; over a long reply the voice drifts from the speaker it was cloned from.",
+    cue: "Same text again. In the experiments the gaps were shortest here, the first cut of the reply aside. Listen to the end; then press Speak again and Interrupt partway through to see what was heard.",
+  },
+};
+const PRESETS = {
+  Directions: "Sure, here's the easiest way to get there from the station. Take the north exit and turn left onto Main Street. Keep walking until you see a small bakery with a green awning on the corner. Turn right just after the bakery, and the museum will be on your left, right across from the park. It's a short walk, so if you leave now, you should get there a little before it opens.",
+  Billing: "I've looked into your account, and I can see what happened with last month's bill. You were charged twice because the first payment went through, but the app showed an error, so you tried again. Our system flagged the second charge automatically, and the refund has already been approved on our side. Depending on your bank, it can take a few business days to show up.",
+  "Two sentences": "Sure, here's the easiest way to get there from the station. Take the north exit and turn left onto Main Street.",
+};
+const KINDS = { word: "mid-phrase", clause: "at a comma", sentence: "at a sentence end" };
+
+// The token is taken out of the address so that a screenshot or recording does not show it.
+let token = new URLSearchParams(location.search).get("token") || "";
+try {
+  if (token) {
+    sessionStorage.setItem("live-token", token);
+    history.replaceState(null, "", location.pathname);
+  } else token = sessionStorage.getItem("live-token") || "";
+} catch (error) { /* storage blocked: the token stays in the address */ }
+
+let socket = null, context = null, ready = null, run = null, seq = 0, everConnected = false;
+const runs = []; // finished runs of this page session, newest first
+
+const normalise = (text) => text.replace(/\s+/g, " ").trim();
+const replyText = () => normalise($("text").value);
+const presetName = (text) => Object.keys(PRESETS).find((name) => PRESETS[name] === text) || "Custom";
+const selectedMode = () => document.querySelector("#modes input:checked")?.value || ORDER[0];
+const isActive = () => run !== null && ACTIVE.includes(run.state);
+const T = () => (performance.now() - run.t0) / 1000; // seconds since Speak
+
+/* ---------- replay: recorded runs stand in for the server ---------- */
+
+// On a static host there is no server. The page then replays runs recorded from the real model: the same
+// messages at their recorded times and the same audio. Nothing is generated. It answers like the socket.
+class Replay {
+  constructor(data) {
+    this.data = data;
+    this.readyState = WebSocket.OPEN;
+    this.turn = {};         // which take plays next, per reply and way
+    this.audio = new Map(); // file -> a promise of its bytes
+    this.playing = null;    // the run being replayed
+    for (const rec of data.runs) { // where each chunk ends in the reply text
+      let cursor = 0;
+      for (const chunk of rec.chunks) cursor = chunk.to = rec.text.indexOf(chunk.text, cursor) + chunk.text.length;
+    }
+  }
+
+  ready() {
+    const { sample_rate, modes, chunking, device, recorded, runs } = this.data;
+    return { type: "ready", sample_rate, modes, chunking, device, fake: false, replay: { recorded, runs: runs.length } };
+  }
+
+  bytes(rec) {
+    if (!this.audio.has(rec.audio)) {
+      this.audio.set(rec.audio, fetch(`recordings/${rec.audio}`).then((response) => {
+        if (!response.ok) throw new Error(`${rec.audio}: ${response.status}`);
+        return response.arrayBuffer();
+      }));
+    }
+    return this.audio.get(rec.audio);
+  }
+
+  send(json) {
+    const message = JSON.parse(json);
+    if (message.type === "start") this.start(message);
+    else if (message.type === "interrupt") this.interrupt(message.heard_s);
+    // text and flush need no answer: the recording was fed the same text at the same speed
+  }
+
+  at(playing, seconds, action) {
+    const wait = Math.max(0, seconds * 1000 - (performance.now() - playing.t0));
+    playing.timers.push(setTimeout(() => { if (this.playing === playing) action(); }, wait));
+  }
+
+  async start({ mode, id }) {
+    if (this.playing) this.playing.timers.forEach(clearTimeout);
+    const takes = this.data.runs.filter((rec) => rec.text === run.text && rec.way === mode), key = `${mode}|${run.text}`;
+    const playing = (this.playing = { id, t0: run.t0, sent: 0, timers: [], reported: null });
+    if (!takes.length) return this.at(playing, 0, () => onMessage({ type: "error", message: "there is no recording of this reply spoken this way", reply: id }));
+    const rec = (playing.rec = takes[(this.turn[key] = (this.turn[key] ?? -1) + 1) % takes.length]);
+    run.take = `take ${rec.take} of ${takes.length}`;
+    let decoded;
+    try {
+      decoded = await context.decodeAudioData((await this.bytes(rec)).slice(0));
+    } catch (error) {
+      return this.at(playing, 0, () => onMessage({ type: "error", message: `the recording could not be loaded (${error.message})`, reply: id }));
+    }
+    if (this.playing !== playing) return; // stopped while it was loading
+    run.sampleRate = decoded.sampleRate;
+    const wave = decoded.getChannelData(0), scale = decoded.sampleRate / this.data.sample_rate;
+    let offset = 0;
+    rec.chunks.forEach((chunk, index) => {
+      const pcm = Int16Array.from(wave.subarray(Math.round(offset * scale), Math.round((offset + chunk.samples) * scale)), (v) => clamp(Math.round(v * 32767), -32768, 32767));
+      offset += chunk.samples;
+      const { arrive_s, samples, to, ...meta } = chunk;
+      this.at(playing, arrive_s, () => {
+        playing.sent = index + 1;
+        onMessage({ type: "audio", ...meta, reply: id });
+        onAudio(pcm.buffer);
+      });
+    });
+    this.at(playing, rec.done_s, () => {
+      playing.reported = "done";
+      onMessage({ type: "finish", reason: "done", chunks: rec.chunks.length, reply: id });
+    });
+  }
+
+  // What the server would answer: the chunks heard in full, the one partly heard, and the text it had
+  // received that was never played. Like the server, it answers only once the chunk it was generating is
+  // finished: v0 cannot cancel a generation.
+  interrupt(heardS) {
+    const playing = this.playing;
+    if (!playing || !playing.rec || playing.reported === "interrupted") return;
+    playing.timers.forEach(clearTimeout);
+    const { rec, id } = playing, now = (performance.now() - playing.t0) / 1000, next = rec.chunks[playing.sent];
+    const wait = playing.reported === null && next && now >= next.arrive_s - next.gen_s ? Math.max(0, next.arrive_s - now) : 0;
+    const heard = [];
+    let cut = null, start = 0, upto = 0;
+    for (const chunk of rec.chunks.slice(0, playing.sent)) {
+      const end = start + chunk.audio_s;
+      if (end <= heardS + 0.01) { heard.push(chunk.text); upto = chunk.to; }
+      else if (start < heardS && !cut) { cut = { text: chunk.text, heard: Math.round(((heardS - start) / chunk.audio_s) * 100) / 100 }; upto = chunk.to; }
+      start = end;
+    }
+    playing.reported = "interrupted";
+    const finish = {
+      type: "finish", reason: "interrupted", heard_s: Math.round(heardS * 1000) / 1000, heard_text: heard.join(" "), cut,
+      unheard_text: rec.text.slice(upto, Math.max(upto, run.fed)).trim(), reply: id,
+    };
+    playing.timers.push(setTimeout(() => { if (this.playing === playing) onMessage(finish); }, wait * 1000));
+  }
+}
+
+// Without a token there is no server to ask. If recorded runs sit next to the page, replay them.
+async function startReplay() {
+  try {
+    const response = await fetch("recordings/index.json");
+    if (!response.ok) throw new Error(String(response.status));
+    socket = new Replay(await response.json());
+  } catch (error) {
+    setPill("bad", "No token in the address");
+    $("status").textContent = "This address has no access token. Open the address the server printed when it started; it ends in ?token=…";
+    return;
+  }
+  onMessage(socket.ready());
+}
+
+/* ---------- connection ---------- */
+
+function setPill(kind, text) {
+  $("pill").className = "pill " + kind;
+  $("pill").lastElementChild.textContent = text;
+}
+
+function connect() {
+  if (!token) return startReplay();
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  socket = new WebSocket(`${scheme}://${location.host}/ws?token=${encodeURIComponent(token)}`);
+  socket.binaryType = "arraybuffer";
+  socket.onmessage = (event) => (typeof event.data === "string" ? onMessage(JSON.parse(event.data)) : onAudio(event.data));
+  socket.onclose = () => {
+    ready = null;
+    if (isActive()) {
+      // What has arrived plays out; nothing more will come, and nobody is left to report on it.
+      run.offline = true;
+      clearInterval(run.timer);
+      run.timer = 0;
+      if (run.state === "stopping") { run.noReport = "the connection closed first"; endRun("interrupted"); }
+      else if (!run.allGenerated) { run.lost = true; run.allGenerated = true; } // after "done" nothing is missing
+    }
+    setPill("bad", everConnected ? "Connection lost" : "Not connected");
+    refresh();
+    setTimeout(connect, 2000);
+  };
+}
+
+function onMessage(message) {
+  if (message.type === "ready") {
+    ready = message;
+    everConnected = true;
+    const present = ORDER.filter((mode) => message.modes.includes(mode));
+    if (!document.querySelector("#modes input")) renderModes(present);
+    $("banner").hidden = !message.fake;
+    setPill(message.fake ? "tones" : "ok", message.fake ? "Stand-in mode · tones, no model" : `${message.replay ? "Recorded" : "Connected"}${message.device ? " · " + message.device : ""}`);
+    if (message.chunking) $("step-size").textContent = ` (about ${message.chunking[1]} characters)`;
+    if (message.device) $("provenance").textContent = `Numbers on this page are measured in this session on one ${message.device}, except the experiment medians and the first-audio range under the limits, which say where they come from.`;
+    if (message.replay) {
+      const day = new Date(`${message.replay.recorded}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+      const note = $("replay-note");
+      note.hidden = false;
+      note.replaceChildren(el("b", "", "Recorded replay."), ` These ${message.replay.runs} runs were generated by the model on one ${message.device} on ${day} and are replayed here with their recorded timing: the same audio, the same gaps, the same generation times. Nothing is generated now. Where a reply was recorded several times, the takes play in turn; none was left out.`);
+      $("provenance").textContent = `Numbers on this page were measured when the runs were recorded on one ${message.device} (${day}), except the experiment medians and the first-audio range under the limits, which say where they come from.`;
+      $("edit-toggle").hidden = true; // a recording cannot speak new text
+      $("speed").value = socket.data.rate;
+    }
+    if (message.chunking) $("min-chars").textContent = message.chunking[0];
+    refresh();
+  } else if (message.reply !== undefined && (!run || message.reply !== run.id)) {
+    return; // about an earlier reply
+  } else if (message.type === "audio") {
+    if (run && (run.state === "waiting" || run.state === "speaking")) run.meta = message;
+  } else if (message.type === "finish") {
+    if (!run) return;
+    if (message.reason === "done" && (run.state === "waiting" || run.state === "speaking")) {
+      run.allGenerated = true;
+      if (run.chunks.length) setState("draining");
+    } else if (message.reason === "interrupted" && run.state === "stopping") {
+      run.report = message;
+      run.reportDelay = T() - run.stopAt;
+      endRun("interrupted");
+    }
+  } else if (message.type === "error") {
+    if (isActive() && run.state !== "stopping") {
+      clearInterval(run.timer);
+      run.timer = 0;
+      run.failed = message.message;
+      run.allGenerated = true;
+      refresh();
+    } else if (!isActive()) $("status").textContent = `The server reported an error: ${message.message}`;
+  }
+}
+
+/* ---------- a run ---------- */
+
+// rest: the unheard part of the run that was just interrupted, to go on from there.
+function speak(rest) {
+  const previous = typeof rest === "string" ? run : null, text = previous ? rest : replyText();
+  if (!ready || isActive() || !text || socket.readyState !== WebSocket.OPEN) return;
+  if (!context) {
+    try { context = new AudioContext({ sampleRate: ready.sample_rate }); } catch (error) { context = new AudioContext(); }
+  }
+  context.resume();
+  const gain = context.createGain();
+  gain.connect(context.destination);
+  const mode = previous ? previous.mode : selectedMode();
+  run = {
+    id: ++seq, mode, text, rate: Number($("speed").value), fake: ready.fake, replay: Boolean(ready.replay), take: "",
+    preset: previous ? `Rest of run ${previous.id}` : presetName(text),
+    // A continuation shows what was heard before it, and still belongs to the whole reply.
+    before: previous ? [previous.before, keptText(previous)].filter(Boolean).join(" ") : "",
+    whole: previous ? previous.whole || previous.text : null,
+    t0: performance.now(), state: "waiting", timer: 0, fed: 0, sends: [], flushAt: null, cursor: 0, matched: true,
+    chunks: [], meta: null, gain, queueEnd: 0, firstAudio: null, parts: null, sentAtFirst: null, playing: -1,
+    allGenerated: false, failed: null, lost: false, hidden: document.hidden,
+    stopAt: null, heard: null, report: null, reportDelay: null, domain: 12, lastStatus: 0,
+    minChars: ready.chunking ? ready.chunking[0] : 12,
+  };
+  $("stage").style.setProperty("--c", MODES[mode].color);
+  document.querySelector(".tiles").style.setProperty("--c", MODES[mode].color);
+  resetStage();
+  socket.send(JSON.stringify({ type: "start", mode, id: run.id }));
+  run.timer = setInterval(feed, SEND_MS);
+  run.watch = setInterval(step, 250);
+  refresh();
+  requestAnimationFrame(frame);
+}
+
+function feed() {
+  const r = run;
+  if (!r || !r.timer || socket.readyState !== WebSocket.OPEN) return;
+  const upto = Math.min(r.text.length, Math.round(T() * r.rate));
+  if (upto > r.fed) {
+    socket.send(JSON.stringify({ type: "text", text: r.text.slice(r.fed, upto) }));
+    r.fed = upto;
+    r.sends.push([T(), upto]);
+    renderReply();
+    $("tl-sent").style.setProperty("--d", T());
+  }
+  if (r.fed >= r.text.length) {
+    clearInterval(r.timer);
+    r.timer = 0;
+    r.flushAt = T();
+    socket.send(JSON.stringify({ type: "flush" }));
+    const mark = el("div", "at end");
+    mark.style.setProperty("--t", r.flushAt);
+    mark.append(el("span", "", "end of text"));
+    $("tl-text").append(mark);
+  }
+}
+
+// The run time at which the first n characters had been sent.
+function sentBy(n) {
+  const send = run.sends.find(([, count]) => count >= n);
+  return send ? send[0] : null;
+}
+
+// A chunk can be generated once the chunk after it can no longer change: when min_chars characters
+// beyond that one have arrived (a shorter tail would still be merged into it), or the text has ended.
+function speakableAt(chunk) {
+  if (chunk.to === null) return null;
+  if (!chunk.lookahead) return run.flushAt;
+  const from = run.text.indexOf(chunk.lookahead, chunk.to);
+  if (from < 0) return null;
+  let next = from + chunk.lookahead.length;
+  while (next < run.text.length && run.text[next] === " ") next++;
+  return next >= run.text.length ? run.flushAt : sentBy(Math.min(run.text.length, next + run.minChars));
+}
+
+function onAudio(data) {
+  const r = run;
+  if (!r || !r.meta || (r.state !== "waiting" && r.state !== "speaking")) return;
+  const meta = r.meta;
+  r.meta = null;
+  const samples = Float32Array.from(new Int16Array(data), (value) => value / 32768);
+  const buffer = context.createBuffer(1, Math.max(1, samples.length), r.sampleRate || ready.sample_rate);
+  buffer.copyToChannel(samples, 0);
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.connect(r.gain);
+  const nowCtx = context.currentTime, now = T(), first = r.chunks.length === 0;
+  const startCtx = first ? nowCtx + LEAD_S : Math.max(r.queueEnd, nowCtx + LEAD_S);
+  // The queue ran dry: the listener hears a silence that is not in the audio.
+  let stall = first ? 0 : startCtx - r.queueEnd;
+  if (stall < STALL_MIN) stall = 0;
+  source.start(startCtx);
+  r.queueEnd = startCtx + buffer.duration;
+  const start = now + (startCtx - nowCtx);
+  const from = r.matched ? r.text.indexOf(meta.text, r.cursor) : -1;
+  if (from < 0) r.matched = false;
+  else r.cursor = from + meta.text.length;
+  const chunk = {
+    ...meta, duration: buffer.duration, arrive: now, start, end: start + buffer.duration, startCtx, stall, source,
+    from: from < 0 ? null : from, to: from < 0 ? null : from + meta.text.length,
+  };
+  chunk.measured = isNum(meta.lead_s) && isNum(meta.trail_s);
+  chunk.noSpeech = chunk.measured && meta.lead_s + meta.trail_s >= buffer.duration - 0.01;
+  r.chunks.push(chunk);
+  if (first) {
+    r.firstAudio = start;
+    const gen = meta.gen_s, known = speakableAt(chunk);
+    let wait = known ?? Math.max(0, now - gen), rest = start - wait - gen;
+    if (rest < 0) { wait = Math.max(0, wait + rest); rest = 0; }
+    r.parts = { wait, gen, rest };
+    setState("speaking");
+  }
+  growDomain();
+  drawChunk(chunk, r.chunks.length - 1);
+  renderReply();
+  renderTiles();
+  renderChunkTable();
+}
+
+function heardSeconds() {
+  const now = context.currentTime;
+  return run.chunks.reduce((sum, chunk) => sum + clamp(now - chunk.startCtx, 0, chunk.duration), 0);
+}
+
+function interrupt() {
+  const r = run;
+  if (!r || !["waiting", "speaking", "draining"].includes(r.state)) return;
+  r.heard = context ? heardSeconds() : 0;
+  r.stopAt = T();
+  clearInterval(r.timer);
+  r.timer = 0;
+  const now = context.currentTime; // a short fade, so the cut does not click
+  r.gain.gain.setValueAtTime(1, now);
+  r.gain.gain.linearRampToValueAtTime(0, now + 0.015);
+  for (const chunk of r.chunks) { try { chunk.source.stop(now + 0.02); } catch (error) { /* already ended */ } }
+  // A stall that was still going on when the listener stopped it.
+  if (r.chunks.length && !r.allGenerated && r.stopAt - r.chunks.at(-1).end >= STALL_MIN) r.openStall = r.stopAt - r.chunks.at(-1).end;
+  const flag = el("div", "at flag" + (r.stopAt > r.domain * 0.7 ? " left" : ""), `interrupted at ${s2(r.stopAt)} s`);
+  flag.style.setProperty("--t", r.stopAt);
+  $("tl-notes").append(flag);
+  fitLabels();
+  $("playhead").classList.add("stopped");
+  // The server that held this reply is gone: there is nobody to ask what was heard.
+  if (r.offline || socket.readyState !== WebSocket.OPEN) {
+    r.noReport = "the connection closed first";
+    r.state = "stopping";
+    return endRun("interrupted");
+  }
+  socket.send(JSON.stringify({ type: "interrupt", heard_s: Number(r.heard.toFixed(3)) }));
+  setState("stopping");
+  renderReply();
+  renderReport();
+  setTimeout(() => {
+    if (run !== r || r.state !== "stopping") return;
+    r.noReport = "within 10 s";
+    endRun("interrupted");
+  }, 10000);
+}
+
+function setState(state) {
+  run.state = state;
+  refresh();
+}
+
+function endRun(outcome) {
+  const r = run;
+  clearInterval(r.timer);
+  clearInterval(r.watch);
+  r.timer = 0;
+  r.state = outcome;
+  $("tl-pending").hidden = true;
+  if (r.firstAudio === null) $("tl-first").remove();
+  $("veil").hidden = outcome !== "interrupted";
+  if (outcome === "interrupted") {
+    r.chunks.forEach((chunk) => chunk.els.play.classList.toggle("unheard", chunk.start >= r.stopAt));
+    $("veil").style.left = `${(r.stopAt / r.domain) * 100}%`;
+  } else {
+    $("playhead").hidden = true;
+  }
+  const gaps = heardGaps(r), mid = gaps.filter((gap) => gap.kind === "word").map((gap) => gap.value);
+  const first = r.firstAudio ?? 0;
+  runs.unshift({
+    id: r.id, mode: r.mode, text: r.text, preset: r.preset, rate: r.rate, fake: r.fake, take: r.take, outcome, stopAt: r.stopAt, heard: r.heard,
+    hidden: r.hidden, firstAudio: r.firstAudio, speed: speedOf(r), stalls: stallsOf(r).count,
+    stalled: stallsOf(r).total, median: median(mid), cuts: mid.length,
+    length: r.chunks.length ? (outcome === "interrupted" ? r.stopAt : r.chunks.at(-1).end) - first : 0,
+    strip: r.chunks.map((chunk, index) => ({
+      t: chunk.start - first, d: chunk.duration, lead: chunk.lead_s, trail: chunk.trail_s, measured: chunk.measured,
+      before: index ? r.chunks[index - 1].seam : null, seam: chunk.lookahead ? chunk.seam : null, stall: chunk.stall,
+      unheard: outcome === "interrupted" && chunk.start >= r.stopAt,
+    })),
+  });
+  $("timeline").setAttribute("aria-label", timelineSummary(r, mid));
+  $("clock").textContent = outcome === "interrupted" ? `stopped at ${s1(r.stopAt)} s` : r.chunks.length ? `ended at ${s1(r.chunks.at(-1).end)} s` : "";
+  fitLabels();
+  if (r.firstAudio !== null && !r.fake) $("limit-first").textContent = ` ${r.replay ? "In this recording" : "In this session"}: ${s2(r.firstAudio)} s.`;
+  renderReply();
+  renderTiles();
+  renderReport();
+  renderOutcome();
+  renderRuns();
+  renderModeValues();
+  refresh();
+}
+
+/* ---------- numbers ---------- */
+
+// The gap after chunk k: its trailing non-speech plus the leading non-speech of chunk k+1.
+function gapAfter(r, index) {
+  const a = r.chunks[index], b = r.chunks[index + 1];
+  return a && b && a.measured && b.measured ? a.trail_s + b.lead_s : null;
+}
+
+function gapsOf(r) {
+  const gaps = [];
+  for (let index = 0; index + 1 < r.chunks.length; index++) {
+    const value = gapAfter(r, index);
+    if (value !== null) gaps.push({ index, kind: r.chunks[index].seam, value });
+  }
+  return gaps;
+}
+
+// After an interruption only the cuts the listener reached count.
+const heardGaps = (r) => gapsOf(r).filter((gap) => r.stopAt === null || r.chunks[gap.index + 1].start < r.stopAt);
+
+// Stalls between chunks, plus one that was still going on when the listener interrupted.
+function stallsOf(r) {
+  const between = r.chunks.filter((chunk) => chunk.stall), open = r.openStall || 0;
+  return { count: between.length + (open ? 1 : 0), total: between.reduce((sum, chunk) => sum + chunk.stall, 0) + open };
+}
+
+function speedOf(r) {
+  const audio = r.chunks.reduce((sum, chunk) => sum + chunk.duration, 0), made = r.chunks.reduce((sum, chunk) => sum + chunk.gen_s, 0);
+  return made > 0 ? audio / made : null;
+}
+
+function timelineSummary(r, mid) {
+  const first = r.firstAudio === null ? "no audio" : `first audio at ${s2(r.firstAudio)} s`;
+  const gap = mid.length ? `${plural(mid.length, "mid-phrase cut")} with a median gap of ${s2(median(mid))} s` : "no mid-phrase cut";
+  return `Timeline of run ${r.id}: ${plural(r.chunks.length, "chunk")}, ${first}, ${gap}, ${plural(stallsOf(r).count, "stall")}. The chunk table below has the same data.`;
+}
+
+/* ---------- drawing: reply text ---------- */
+
+function renderReply() {
+  const box = $("reply"), r = run;
+  if (!r) {
+    box.replaceChildren(el("span", "idle", replyText() || "Type a reply to speak first."));
+    return;
+  }
+  const mode = MODES[r.mode], now = r.stopAt ?? T(), nodes = [];
+  const stopped = r.stopAt !== null;
+  if (r.before) {
+    const mark = el("i", "cut resumed");
+    mark.setAttribute("role", "img");
+    mark.setAttribute("aria-label", "interrupted here; this run goes on from the next word");
+    mark.title = "Interrupted here. This run goes on from the next word.";
+    nodes.push(el("span", "before", r.before), mark);
+  }
+  r.chunks.forEach((chunk, index) => {
+    let state = "ahead";
+    if (stopped) state = chunk.end <= r.stopAt ? "played" : chunk.start < r.stopAt ? "partly" : "unheard";
+    else if (index === r.playing) state = "playing";
+    else if (now >= chunk.end) state = "played";
+    const span = el("span", "ck " + state, chunk.text);
+    if (!stopped && mode.lookahead && r.playing >= 0 && index === r.playing + 1) span.classList.add("look");
+    nodes.push(span);
+    if (state === "partly") {
+      const cut = r.report && r.report.cut;
+      const share = cut && cut.text === chunk.text ? cut.heard : clamp((r.stopAt - chunk.start) / chunk.duration, 0, 1);
+      nodes.push(el("span", "heardtag", r.state === "stopping" ? "partly heard" : `partly heard, ${Math.round(share * 100)}%`));
+    }
+    if (chunk.lookahead) {
+      const word = chunk.seam === "word";
+      const bar = el("i", "cut" + (word ? " word" : ""));
+      bar.setAttribute("role", "img");
+      bar.setAttribute("aria-label", word ? "cut mid-phrase" : "cut at punctuation");
+      nodes.push(bar);
+      const gap = gapAfter(r, index), next = r.chunks[index + 1];
+      if (gap !== null) nodes.push(el("span", "gapnum" + (word ? " word" : ""), s2(gap)));
+      if (next && next.stall) nodes.push(el("span", "gapnum late", `+${s2(next.stall)} stall`));
+    } else nodes.push(" ");
+  });
+  if (r.matched) {
+    const done = r.chunks.length ? r.chunks.at(-1).to : 0, sentTo = Math.max(done, r.fed);
+    let sent = r.text.slice(done, sentTo);
+    if (r.chunks.length) sent = sent.trimStart();
+    // The lookahead of the chunk being spoken, when that next chunk has not arrived yet.
+    const last = r.chunks.at(-1);
+    if (!stopped && mode.lookahead && last && r.playing === r.chunks.length - 1 && last.lookahead && sent.startsWith(last.lookahead)) {
+      nodes.push(el("span", "sent look", last.lookahead));
+      sent = sent.slice(last.lookahead.length);
+    }
+    if (sent) nodes.push(el("span", stopped ? "unheard" : "sent", sent));
+    if (sentTo < r.text.length) nodes.push(el("span", "ghost", r.text.slice(sentTo)));
+  }
+  box.replaceChildren(...nodes);
+}
+
+/* ---------- drawing: timeline ---------- */
+
+function resetStage() {
+  $("tl-empty").hidden = true;
+  $("tl-notes").replaceChildren();
+  $("tl-labels").replaceChildren();
+  const sent = el("div", "bar now sent");
+  sent.id = "tl-sent";
+  sent.style.setProperty("--t", 0);
+  sent.style.setProperty("--d", 0);
+  $("tl-text").replaceChildren(sent);
+  const pending = el("div", "bar now pending");
+  pending.id = "tl-pending";
+  $("tl-gen").replaceChildren(pending);
+  $("tl-play").replaceChildren($("veil"));
+  $("veil").hidden = false;
+  $("veil").style.left = "0%";
+  $("playhead").hidden = false;
+  $("playhead").className = "";
+  $("lg-stall").hidden = true;
+  $("lg-look").hidden = !MODES[run.mode].lookahead;
+  const first = el("div", "bar now first");
+  first.id = "tl-first";
+  first.style.setProperty("--t", 0);
+  first.append(el("span", "", "first audio …"));
+  $("tl-notes").append(first);
+  setDomain(12);
+  renderReply();
+  renderTiles();
+  renderReport();
+  renderChunkTable();
+  $("outcome").textContent = "";
+  $("outcome").className = "";
+  $("next").hidden = $("resume").hidden = true;
+}
+
+function setDomain(seconds) {
+  run.domain = seconds;
+  $("plot").style.setProperty("--dom", seconds);
+  const ticks = [], every = seconds > 60 ? 10 : 5;
+  for (let second = 0; second <= seconds; second++) {
+    const tick = el("div", "at" + (second % every ? "" : " major"));
+    tick.style.setProperty("--t", second);
+    if (second % every === 0 && second < seconds) tick.append(el("span", "", String(second)));
+    ticks.push(tick);
+  }
+  $("tl-axis").replaceChildren(...ticks);
+}
+
+// The axis only grows, in whole steps, so the picture does not slide around during a run.
+function growDomain() {
+  const r = run, last = r.chunks.at(-1);
+  let needed = Math.max(T(), last.end) + 1;
+  const spoken = r.matched && last.to ? last.to : 0;
+  if (spoken) needed = Math.max(needed, r.firstAudio + (r.text.length * (r.chunks.reduce((sum, c) => sum + c.duration, 0) / spoken)) * 1.08);
+  if (needed > r.domain) setDomain(Math.ceil(needed / 5) * 5);
+  fitLabels();
+}
+
+function playBlock(strip, index) {
+  const block = el("div", "bar pc" + (strip.unheard ? " unheard" : ""));
+  block.style.setProperty("--t", strip.t);
+  block.style.setProperty("--d", strip.d);
+  if (strip.measured && strip.lead + strip.trail >= strip.d - 0.01) {
+    block.classList.add("nospeech"); // the detector found no speech in this chunk
+    block.append(el("div", "sp"));
+    return block;
+  }
+  const share = (seconds) => `${clamp((seconds / strip.d) * 100, 0, 100)}%`;
+  if (strip.measured) {
+    const lead = el("div", "edge" + (strip.before ? (strip.before === "word" ? " word" : " rest") : ""));
+    lead.style.width = share(strip.lead);
+    const trail = el("div", "edge" + (strip.seam ? (strip.seam === "word" ? " word" : " rest") : ""));
+    trail.style.width = share(strip.trail);
+    block.append(lead, el("div", "sp"), trail);
+  } else block.append(el("div", "sp"));
+  if (index !== undefined) block.querySelector(".sp").dataset.label = String(index + 1);
+  return block;
+}
+
+function drawChunk(chunk, index) {
+  const r = run, previous = r.chunks[index - 1];
+  // Generate: as long as the server's generating time, ending when the audio reached the browser.
+  const made = el("div", "bar");
+  made.dataset.label = s2(chunk.gen_s);
+  const from = Math.max(previous ? previous.arrive : 0, chunk.arrive - chunk.gen_s);
+  made.style.setProperty("--t", from);
+  made.style.setProperty("--d", chunk.arrive - from);
+  made.title = `Chunk ${index + 1}: generated in ${s2(chunk.gen_s)} s`;
+  $("tl-gen").insertBefore(made, $("tl-pending"));
+  // Play: speech tall, non-speech at the edges low.
+  const play = playBlock({
+    t: chunk.start, d: chunk.duration, lead: chunk.lead_s, trail: chunk.trail_s, measured: chunk.measured,
+    before: previous ? previous.seam : null, seam: chunk.lookahead ? chunk.seam : null,
+  }, index);
+  play.title = `Chunk ${index + 1}: “${chunk.text}”, played ${s2(chunk.start)} to ${s2(chunk.end)} s`;
+  $("tl-play").insertBefore(play, $("veil"));
+  chunk.els = { made, play };
+  if (chunk.stall) {
+    const stall = el("div", "bar stall");
+    stall.style.setProperty("--t", previous.end);
+    stall.style.setProperty("--d", chunk.stall);
+    $("tl-play").insertBefore(stall, $("veil"));
+    $("lg-stall").hidden = false;
+  }
+  if (chunk.to !== null) {
+    const done = sentBy(chunk.to);
+    if (done !== null) {
+      const tick = el("div", "at");
+      tick.style.setProperty("--t", done);
+      $("tl-text").append(tick);
+    }
+  }
+  if (previous) {
+    const gap = gapAfter(r, index - 1), word = previous.seam === "word";
+    const parts = [];
+    if (gap !== null) parts.push(s2(gap));
+    if (chunk.stall) parts.push(`+${s2(chunk.stall)} stall`);
+    if (parts.length) {
+      const label = el("div", "at" + (chunk.stall ? " stalled" : word ? " word" : ""), parts.join(" "));
+      label.style.setProperty("--t", previous.end + chunk.stall / 2);
+      label.dataset.rank = chunk.stall ? 0 : word ? 1 : 2;
+      $("tl-labels").append(label);
+    }
+  }
+  if (index === 0) {
+    const first = $("tl-first");
+    first.style.setProperty("--d", chunk.start);
+    first.firstChild.textContent = `first audio ${s2(chunk.start)} s`;
+  }
+  fitLabels();
+}
+
+// Labels that would collide are hidden: stalls first, then mid-phrase gaps, then the rest.
+// A number inside a bar is shown only where the bar is wide enough for it.
+function fitLabels() {
+  for (const bar of document.querySelectorAll("#plot [data-label]")) {
+    const text = bar.clientWidth >= 8 + 7.5 * bar.dataset.label.length ? bar.dataset.label : "";
+    if (bar.textContent !== text) bar.textContent = text;
+  }
+  // The interruption flag wins over the first-audio note where they would overlap: the tile has that value.
+  const flag = document.querySelector("#tl-notes .flag"), first = $("tl-first");
+  if (flag && first) {
+    first.firstChild.hidden = false;
+    const note = first.firstChild.getBoundingClientRect(), over = flag.getBoundingClientRect();
+    first.firstChild.hidden = over.left < note.right && over.right > note.left;
+  }
+  const labels = [...$("tl-labels").children].sort((a, b) => a.dataset.rank - b.dataset.rank), placed = [];
+  for (const label of labels) {
+    label.classList.remove("hide");
+    const box = label.getBoundingClientRect();
+    if (placed.some((other) => box.left < other.right + 4 && box.right > other.left - 4)) label.classList.add("hide");
+    else placed.push(box);
+  }
+}
+
+// Everything that follows the clock. It runs on animation frames, and on a timer as well, so that a run
+// still ends when the tab is in the background and frames stop.
+function step() {
+  const r = run;
+  if (!r || !ACTIVE.includes(r.state)) return;
+  const now = r.stopAt ?? T();
+  if (now > r.domain) setDomain(Math.ceil((now + 1) / 5) * 5);
+  const x = `${clamp(now / r.domain, 0, 1) * 100}%`;
+  $("playhead").style.left = x;
+  $("veil").style.left = x;
+  const playing = r.stopAt === null ? r.chunks.findIndex((chunk) => now >= chunk.start && now < chunk.end) : -1;
+  if (playing !== r.playing) {
+    r.playing = playing;
+    renderReply();
+    refresh();
+  }
+  if (r.state === "waiting" && r.firstAudio === null) $("tl-first").style.setProperty("--d", now);
+  if (r.state === "waiting" || r.state === "speaking") {
+    const from = r.chunks.length ? r.chunks.at(-1).arrive : 0;
+    $("tl-pending").hidden = r.allGenerated;
+    $("tl-pending").style.setProperty("--t", from);
+    $("tl-pending").style.setProperty("--d", Math.max(0, now - from));
+  } else $("tl-pending").hidden = true;
+  if (r.firstAudio !== null && r.sentAtFirst === null && now >= r.firstAudio) {
+    const sends = r.sends.filter(([time]) => time <= r.firstAudio);
+    r.sentAtFirst = sends.length ? sends.at(-1)[1] : 0;
+    renderTiles();
+  }
+  if (performance.now() - r.lastStatus > 250) {
+    r.lastStatus = performance.now();
+    const buffered = r.chunks.length ? Math.max(0, r.chunks.at(-1).end - now) : 0;
+    $("clock").textContent = `t = ${s1(now)} s${r.chunks.length && r.stopAt === null ? ` · ${s1(buffered)} s of audio buffered` : ""}`;
+    if (r.state === "waiting" && now > 8 && !r.slow) { r.slow = true; refresh(); }
+  }
+  if (r.state !== "stopping" && r.allGenerated && (!r.chunks.length || now >= r.chunks.at(-1).end)) {
+    endRun(r.failed ? "error" : r.lost ? "lost" : "done");
+  }
+}
+
+function frame() {
+  step();
+  if (isActive()) requestAnimationFrame(frame);
+}
+
+/* ---------- drawing: tiles, report, tables ---------- */
+
+function renderTiles() {
+  const r = run;
+  const blank = (id, chart, detail) => { $(id).textContent = "–"; $(chart).replaceChildren(); $(detail).textContent = ""; };
+  if (!r) return ["gap", "first", "stall"].forEach((k) => blank(`${k}-value`, `${k}-chart`, `${k}-detail`)), blank("speed-v", "speed-chart", "speed-detail");
+  const mode = MODES[r.mode], ended = !ACTIVE.includes(r.state);
+
+  const mid = heardGaps(r).filter((gap) => gap.kind === "word").map((gap) => gap.value), mMid = median(mid);
+  $("gap-value").innerHTML = mMid === null ? "–" : `${s2(mMid)}<small> s</small>`;
+  const reference = r.fake ? "tones, not speech" : `experiments, this way: ${s2(mode.offline)} s over 138 cuts`;
+  $("gap-detail").textContent = mMid === null
+    ? (r.chunks.some((chunk) => !chunk.measured) ? "Not measured by this server." : `No mid-phrase cut${ended ? "" : " yet"} · ${reference}`)
+    : `median of ${plural(mid.length, "cut")} ${ended ? (r.stopAt === null ? "in this run" : "heard before the interruption") : "so far"} (solid tick) · ${reference}${r.fake ? "" : " (dotted tick)"}`;
+  const scale = Math.max(1, ...mid, r.fake ? 0 : mode.offline);
+  const marks = mid.map((value) => { const dot = el("i", "dot"); dot.style.left = `${(value / scale) * 100}%`; return dot; });
+  if (mMid !== null) { const tick = el("i", "tick"); tick.style.left = `${(mMid / scale) * 100}%`; tick.title = "this run's median"; marks.push(tick); }
+  if (!r.fake) { const tick = el("i", "tick off"); tick.style.left = `${(mode.offline / scale) * 100}%`; tick.title = "median in the experiments"; marks.push(tick); }
+  $("gap-chart").replaceChildren(...marks);
+  $("gap-scale").textContent = `${Number(scale.toFixed(2))} s`;
+
+  if (r.firstAudio === null) blank("first-value", "first-chart", "first-detail");
+  else {
+    $("first-value").innerHTML = `${s2(r.firstAudio)}<small> s</small>`;
+    const { wait, gen, rest } = r.parts;
+    let left = 0;
+    $("first-chart").replaceChildren(...[["a", wait], ["b", gen], ["d", rest]].map(([cls, seconds]) => {
+      const seg = el("i", "seg " + cls);
+      seg.style.left = `${(left / r.firstAudio) * 100}%`;
+      seg.style.width = `${(seconds / r.firstAudio) * 100}%`;
+      left += seconds;
+      return seg;
+    }));
+    const sent = r.sentAtFirst === null ? "" : ` When it started, ${r.sentAtFirst} of ${r.text.length} characters had been sent.`;
+    $("first-detail").textContent = `${s2(wait)} s waiting for text · ${s2(gen)} s generating · ${s2(rest)} s queue and delivery.${sent}`;
+  }
+
+  const speed = speedOf(r);
+  if (speed === null) blank("speed-v", "speed-chart", "speed-detail");
+  else {
+    $("speed-v").innerHTML = `${s2(speed)}<small>× real time</small>`;
+    const top = Math.max(2, speed), fill = el("i", "fill"), one = el("i", "tick");
+    fill.style.width = `${(speed / top) * 100}%`;
+    one.style.left = `${(1 / top) * 100}%`;
+    one.title = "1×: as fast as playback";
+    $("speed-chart").replaceChildren(fill, one);
+    const audio = r.chunks.reduce((sum, chunk) => sum + chunk.duration, 0), made = r.chunks.reduce((sum, chunk) => sum + chunk.gen_s, 0);
+    $("speed-detail").textContent = `${s1(audio)} s of audio in ${s1(made)} s${r.fake ? " (a timed sleep, not a model)" : ""}`;
+  }
+
+  if (!r.chunks.length) blank("stall-value", "stall-chart", "stall-detail");
+  else {
+    const stalls = stallsOf(r);
+    $("stall-value").textContent = String(stalls.count);
+    $("stall-value").style.color = stalls.count ? "var(--warn)" : "";
+    $("stall-detail").textContent = stalls.count ? `${s2(stalls.total)} s of silence added` : "None.";
+    $("stall-chart").replaceChildren();
+  }
+}
+
+// What an agent would keep as the assistant's turn: the chunks heard in full plus the heard part of the
+// interrupted chunk, estimated from time and moved back to a whole word. v0 has no word timings.
+function keptText(r) {
+  const report = r.report;
+  let kept = report.heard_text || "";
+  if (!report.cut) return kept;
+  const chunk = r.chunks.find((c) => c.start < r.stopAt && r.stopAt < c.end) || r.chunks.find((c) => c.text === report.cut.text);
+  let share = report.cut.heard;
+  if (chunk && chunk.measured) {
+    const speech = chunk.duration - chunk.lead_s - chunk.trail_s;
+    share = speech > 0 ? clamp((report.cut.heard * chunk.duration - chunk.lead_s) / speech, 0, 1) : 0;
+  }
+  const budget = Math.floor(share * report.cut.text.length);
+  let part = "";
+  for (const word of report.cut.text.split(" ")) {
+    const longer = part ? `${part} ${word}` : word;
+    if (longer.length > budget) break;
+    part = longer;
+  }
+  if (part) kept = kept ? `${kept} ${part}` : part;
+  return kept;
+}
+
+// The reply from the word after the last one an agent would keep as said; "" when it cannot be placed.
+function restOf(r) {
+  if (!r || r.state !== "interrupted" || !r.report || r.replay) return ""; // a recording cannot speak a new reply
+  const kept = keptText(r);
+  return kept && r.text.startsWith(kept) ? r.text.slice(kept.length).trim() : "";
+}
+
+function renderReport() {
+  const box = $("report"), r = run, title = el("h3", "", "What had the listener heard?");
+  const quote = (text) => { const q = el("q"); q.textContent = text; return q; };
+  if (!r || r.stopAt === null) {
+    box.replaceChildren(title, el("p", "muted", "Press Interrupt while a reply is playing. Playback stops at once, and the server answers with the text heard in full, the chunk that was partly heard and how far into it, and the text it had received that was never played. A voice agent needs this report to tell its language model what the user actually heard."));
+    box.lastChild.style.margin = "0";
+    return;
+  }
+  if (r.state === "stopping") {
+    box.replaceChildren(title, el("p", "muted", "The sound has stopped. Waiting for the server's report: a chunk that is being generated is finished first."));
+    return;
+  }
+  if (!r.report) {
+    box.replaceChildren(title, el("p", "", `Stopped ${s2(r.stopAt)} s after Speak. No report came from the server${r.noReport === "within 10 s" ? " within 10 s" : ": the connection closed first"}.`));
+    return;
+  }
+  const report = r.report, list = el("dl");
+  const row = (name, ...content) => { const dd = el("dd"); dd.append(...content); list.append(el("dt", "", name), dd); };
+  row("Heard in full", report.heard_text ? quote(report.heard_text) : "Nothing.");
+  if (report.cut) row("Partly heard", quote(report.cut.text), ` ${Math.round(report.cut.heard * 100)}% of this chunk's audio had played.`);
+  else row("Partly heard", report.heard_s > 0 ? "Nothing: the interruption fell between two chunks." : "Nothing.");
+  const unsent = r.fed < r.text.length ? " The rest of the reply had not been sent yet." : "";
+  if (report.unheard_text) row("Sent, never played", quote(report.unheard_text), unsent);
+  else row("Sent, never played", unsent ? `Nothing.${unsent}` : "Nothing: the interruption came in the last chunk.");
+  const dropped = r.chunks.filter((chunk) => chunk.start >= r.stopAt);
+  row("Delivered, not played", dropped.length ? `${plural(dropped.length, "chunk")}, ${s1(dropped.reduce((sum, chunk) => sum + chunk.duration, 0))} s of audio, discarded.` : "None.");
+  const lead = el("p", "", report.heard_s > 0 ? `Interrupted ${s2(r.stopAt)} s after Speak, with ${s2(report.heard_s)} s of audio played. ` : "Interrupted before the first audio: nothing was heard. ");
+  lead.append(`The server's report arrived ${s2(r.reportDelay)} s after the click.`);
+  const kept = el("p", "kept");
+  kept.append(el("span", "label", "What an agent would keep as said"), document.createElement("br"), keptText(r) ? quote(keptText(r)) : "Nothing.");
+  box.replaceChildren(title, lead, list, kept, el("p", "small muted", "The split inside the partly heard chunk is estimated from time and moved back to a whole word; v0 has no word timings. The report waits for a chunk that is being generated, and the model is not rolled back to this point. “Continue from where it stopped” speaks the rest as a new reply that starts after the last word kept; an agent would more often answer an interruption with a new reply." + (r.replay ? " It needs the live model, so it is not offered in this recorded replay." : "")));
+  box.lastChild.style.margin = "0";
+}
+
+function renderOutcome() {
+  const r = run, mode = MODES[r.mode], out = $("outcome");
+  const audio = r.chunks.reduce((sum, chunk) => sum + chunk.duration, 0);
+  const stalls = stallsOf(r);
+  const mid = heardGaps(r).filter((gap) => gap.kind === "word").map((gap) => gap.value);
+  let text;
+  if (r.state === "interrupted") {
+    text = !r.report ? `Stopped ${s2(r.stopAt)} s after Speak, without a report from the server.`
+      : r.report.heard_s > 0 ? `Interrupted ${s2(r.stopAt)} s after Speak, with ${s2(r.report.heard_s)} s of audio played. The report on what was heard is below.`
+      : "Interrupted before the first audio. The report is below.";
+  } else {
+    const head = r.state === "error" ? `The server stopped this reply: ${r.failed}. ` : r.state === "lost" ? "Connection lost during this reply; what had arrived was played. " : r.take ? `Done (recorded ${r.take}). ` : "Done. ";
+    if (!r.chunks.length) { out.textContent = `${head}Nothing was generated.`; $("next").hidden = $("resume").hidden = true; return; }
+    const stallText = stalls.count ? `playback stalled ${stalls.count === 1 ? "once" : `${stalls.count} times`}, ${s2(stalls.total)} s in total` : "no stalls";
+    let gapText = `Median gap at the ${plural(mid.length, "mid-phrase cut")}: ${s2(median(mid) ?? 0)} s.${r.fake ? "" : ` Experiments, this way: ${s2(mode.offline)} s.`}`;
+    if (r.chunks.length === 1) gapText = "The reply fit in one chunk, so there was no cut. Try a longer reply.";
+    else if (!mid.length) gapText = r.chunks.some((chunk) => !chunk.measured) ? "" : "No cut fell mid-phrase, so there is no gap to report.";
+    const limit = r.chunks.findIndex((chunk) => chunk.finish_reason && chunk.finish_reason !== "eos");
+    text = `${head}${plural(r.chunks.length, "chunk")}, ${s1(audio)} s of audio, ${stallText}. ${gapText}${limit < 0 ? "" : ` Chunk ${limit + 1} ran to the length limit: the model did not stop on its own.`}`;
+  }
+  if (r.hidden) text += " This tab was in the background during the run, so the text timing is not exact.";
+  out.textContent = text;
+  $("resume").hidden = !restOf(r);
+  const next = nextMode();
+  $("next").hidden = !next || r.state !== "done";
+  if (next) $("next").textContent = `Next: ${MODES[next].name.toLowerCase()}`;
+  if (!next && r.state === "done") out.textContent += " You have run all three: compare the rows under Runs in this session.";
+}
+
+const latest = (mode, text) => runs.find((entry) => entry.mode === mode && entry.text === text && entry.outcome === "done");
+function nextMode() {
+  const text = run ? run.whole || run.text : replyText();
+  return ORDER.find((mode) => document.querySelector(`#modes input[value="${mode}"]`) && !latest(mode, text)) || null;
+}
+
+function renderModes(present) {
+  $("modes").replaceChildren(...present.map((key, index) => {
+    const mode = MODES[key], card = el("label", "card mode");
+    card.style.setProperty("--c", mode.color);
+    const input = el("input");
+    input.type = "radio"; input.name = "mode"; input.value = key; input.checked = index === 0;
+    input.addEventListener("change", refresh);
+    const head = el("span", "head");
+    head.append(el("span", "step", String(index + 1)), mode.name);
+    if (mode.tag) head.append(el("span", "tag", mode.tag));
+    const offline = el("span", "row"), rail = el("span", "rail"), fill = el("i");
+    fill.style.width = `${(mode.offline / 0.45) * 100}%`;
+    rail.append(fill);
+    offline.append(el("span", "muted", "Experiments"), rail, el("b", "", `${s2(mode.offline)} s`));
+    const live = el("span", "row live"), liveRail = el("span", "rail");
+    liveRail.append(el("i"));
+    live.append(el("span", "muted", "This session"), liveRail, el("b", "none", "–"));
+    live.dataset.live = key;
+    card.append(input, head, el("span", "blurb", mode.blurb), el("span", "paper", `On the results page: ${mode.paper}`),
+      el("span", "cap", "Median gap at mid-phrase cuts · shorter is better"), offline, live, el("span", "note", "not run yet"));
+    return card;
+  }));
+  renderModeValues();
+}
+
+function renderModeValues() {
+  const text = replyText();
+  for (const row of document.querySelectorAll("[data-live]")) {
+    const mode = row.dataset.live, entry = latest(mode, text), value = row.lastElementChild, fill = row.querySelector("i");
+    const note = row.nextElementSibling, measured = entry && entry.median !== null && !entry.fake;
+    value.textContent = measured ? `${s2(entry.median)} s` : "–";
+    value.className = measured ? "" : "none";
+    fill.style.width = measured ? `${clamp(entry.median / 0.45, 0, 1) * 100}%` : "0";
+    fill.style.display = measured ? "" : "none";
+    if (measured) note.textContent = `${plural(entry.cuts, "cut")} in run ${entry.id}`;
+    else if (entry) note.textContent = entry.fake ? "run with tones: nothing to compare" : "run, but no cut fell mid-phrase";
+    else note.textContent = runs.some((other) => other.mode === mode && other.text === text) ? "not played to the end yet: not counted" : "not run yet";
+  }
+}
+
+function renderRuns() {
+  $("runs").hidden = false;
+  $("runs-empty").hidden = true;
+  const scale = Math.max(5, ...runs.map((entry) => entry.length));
+  const rows = [];
+  for (const entry of runs) {
+    const mode = MODES[entry.mode], row = el("tr", "run");
+    row.style.setProperty("--c", mode.color);
+    const cell = (text, cls) => { const td = el("td", cls, text); row.append(td); return td; };
+    cell(String(entry.id));
+    const name = cell("");
+    name.append(el("i", "sw-dot"), mode.name);
+    if (entry.fake) name.append(el("small", "", "tones, not speech"));
+    const reply = cell(entry.preset);
+    reply.append(el("small", "", `${entry.text.length} characters, ${entry.rate} per second${entry.take ? ` · recorded ${entry.take}` : ""}${entry.hidden ? " · tab was in the background" : ""}`));
+    const gap = cell(entry.median === null ? "–" : `${s2(entry.median)} s`, "r");
+    gap.append(el("small", "", `${plural(entry.cuts, "cut")}${entry.fake ? "" : ` · experiments ${s2(mode.offline)} s`}`));
+    cell(entry.firstAudio === null ? "–" : `${s2(entry.firstAudio)} s`, "r");
+    cell(entry.speed === null ? "–" : `${s2(entry.speed)}×`, "r");
+    cell(entry.stalls ? `${entry.stalls} · ${s2(entry.stalled)} s` : "0", "r");
+    cell({ done: "Played to the end", interrupted: `Interrupted, ${s1(entry.heard ?? 0)} s of audio heard`, error: "Server error", lost: "Connection lost" }[entry.outcome]);
+    const stripRow = el("tr", "strip"), stripCell = el("td"), mini = el("div", "mini");
+    stripRow.style.setProperty("--c", mode.color);
+    stripRow.setAttribute("aria-hidden", "true");
+    stripCell.colSpan = 8;
+    mini.style.setProperty("--dom", scale);
+    for (const strip of entry.strip) {
+      if (strip.stall) {
+        const stall = el("div", "bar stall");
+        stall.style.setProperty("--t", strip.t - strip.stall);
+        stall.style.setProperty("--d", strip.stall);
+        mini.append(stall);
+      }
+      mini.append(playBlock(strip));
+    }
+    if (entry.outcome === "interrupted") {
+      const rest = el("div", "bar cutoff");
+      rest.style.setProperty("--t", entry.length);
+      rest.style.setProperty("--d", scale);
+      mini.append(rest);
+    }
+    stripCell.append(mini);
+    stripRow.append(stripCell);
+    rows.push(row, stripRow);
+  }
+  $("runs").tBodies[0].replaceChildren(...rows);
+  renderCompare();
+}
+
+// One neutral sentence once two ways have been run on the reply that is shown.
+function renderCompare() {
+  const text = run && !isActive() ? run.whole || run.text : replyText();
+  const have = ORDER.map((mode) => [mode, latest(mode, text)]).filter(([, entry]) => entry && entry.median !== null && !entry.fake);
+  $("compare").hidden = have.length < 2;
+  if (have.length < 2) return;
+  $("compare").textContent = `This session, same reply: ${have.map(([mode, entry]) => `${MODES[mode].name.toLowerCase()} ${s2(entry.median)} s (${plural(entry.cuts, "cut")})`).join(" · ")}. Experiments, in the same order: ${have.map(([mode]) => s2(MODES[mode].offline)).join(" · ")} s over 138 cuts each.`;
+}
+
+function renderChunkTable() {
+  const r = run, body = $("chunk-rows");
+  $("chunk-summary").textContent = r && r.chunks.length ? `Chunk by chunk (${r.chunks.length})` : "Chunk by chunk";
+  if (!r || !r.chunks.length) {
+    const row = el("tr"), cell = el("td", "muted", "No chunks yet.");
+    cell.colSpan = 9;
+    row.append(cell);
+    return body.replaceChildren(row);
+  }
+  body.replaceChildren(...r.chunks.map((chunk, index) => {
+    const row = el("tr", "run"), gap = gapAfter(r, index), notes = [];
+    if (chunk.finish_reason && chunk.finish_reason !== "eos") notes.push("ran to the length limit");
+    if (chunk.noSpeech) notes.push("no speech detected");
+    const cells = [
+      [String(index + 1)], [chunk.text], [chunk.lookahead ? KINDS[chunk.seam] || chunk.seam : "end of reply"],
+      [`${s2(chunk.duration)} s`, "r"], [`${s2(chunk.gen_s)} s`, "r"], [gap === null ? "–" : `${s2(gap)} s`, "r"],
+      [chunk.stall ? `${s2(chunk.stall)} s` : "–", "r"], [chunk.prompt_rows ? `${chunk.prompt_rows} rows` : "–", "r"], [notes.join(", ")],
+    ];
+    row.append(...cells.map(([text, cls]) => el("td", cls, text)));
+    return row;
+  }));
+}
+
+/* ---------- controls and status ---------- */
+
+function statusText() {
+  if (!ready) return everConnected ? "Connection lost. Reconnecting… If the server was restarted, open the new address it printed." : "Cannot reach the speech server yet. It may be stopped, or the token in the address may be wrong. Trying again…";
+  const r = run;
+  if (!r) return ready.fake ? "Press Speak. Each chunk will be a tone about as long as speech." : ready.replay ? "Press Speak. A recorded run plays with its original timing; the first sound waits for the first chunk." : "Press Speak. v0 sends whole chunks, so the first sound waits for the first chunk.";
+  const count = r.chunks.length;
+  switch (r.state) {
+    case "waiting": return r.slow ? "Still waiting. The GPU speaks one reply at a time, so another reply may be ahead of this one." : "Sending text. Waiting for the first chunk…";
+    case "speaking": return r.failed ? `The server stopped this reply: ${r.failed}. Playing what had arrived.` : r.lost ? "Connection lost. Playing what had arrived." : r.playing < 0 ? "Playback is waiting for the next chunk." : `Playing chunk ${r.playing + 1}. ${count} generated so far.`;
+    case "draining": return `All ${count} chunks generated. Playing chunk ${Math.max(1, r.playing + 1)} of ${count}.`;
+    case "stopping": return "Stopped. Waiting for the server's report…";
+    case "interrupted": return !r.report ? "Interrupted." : $("resume").hidden ? "Interrupted. The report on what was heard is under the numbers below."
+      : "Interrupted. Continue from where it stopped (under the timeline), or read the report under the numbers below.";
+    case "done": return !$("next").hidden ? `Played to the end. To hear the same reply the next way, press “${$("next").textContent}” under the timeline.`
+      : nextMode() ? "Played to the end." : "Played to the end. All three ways are run: compare them under Runs in this session.";
+    case "error": return `The server stopped this reply: ${r.failed}`;
+    default: return "Connection lost during this reply.";
+  }
+}
+
+function refresh() {
+  const active = isActive(), text = replyText();
+  if (token || ready) $("status").textContent = statusText();
+  $("speak").disabled = !ready || active || !text;
+  $("speak").lastElementChild.textContent = run && !active ? "Speak again" : "Speak";
+  $("interrupt").disabled = !run || !["waiting", "speaking", "draining"].includes(run.state);
+  for (const input of document.querySelectorAll("#modes input, #presets button, #text, #speed")) input.disabled = active;
+  const mode = MODES[selectedMode()], step = ORDER.filter((key) => document.querySelector(`#modes input[value="${key}"]`)).indexOf(selectedMode()) + 1;
+  const cue = $("cue");
+  cue.style.setProperty("--c", mode.color);
+  const tones = "Stand-in mode: every cut has the same fixed silence, so the three ways sound alike. Use it to check timing and interruption.";
+  cue.replaceChildren(el("b", "", `Step ${step} of 3 · ${mode.name}.`), ` ${ready && ready.fake ? tones : mode.cue}`);
+  if (!run) $("lg-look").hidden = !mode.lookahead;
+}
+
+// Changing the text returns the stage to its idle picture; finished runs stay in the table.
+function textChanged() {
+  const text = replyText();
+  for (const chip of document.querySelectorAll("#presets button")) chip.setAttribute("aria-pressed", String(PRESETS[chip.textContent] === text));
+  $("count").textContent = `${text.length} characters.`;
+  if (isActive()) return;
+  if (run && (run.whole || run.text) !== text) {
+    run = null;
+    $("tl-empty").hidden = false;
+    for (const id of ["tl-notes", "tl-axis", "tl-text", "tl-gen", "tl-labels"]) $(id).replaceChildren();
+    $("tl-play").replaceChildren($("veil"));
+    $("veil").hidden = true;
+    $("playhead").hidden = true;
+    $("clock").textContent = "";
+    $("outcome").textContent = "Nothing spoken yet.";
+    $("outcome").className = "muted";
+    $("next").hidden = $("resume").hidden = true;
+    renderTiles();
+    renderReport();
+    renderChunkTable();
+  }
+  renderReply();
+  renderModeValues();
+  if (runs.length) renderCompare();
+  refresh();
+}
+
+$("presets").replaceChildren(...Object.keys(PRESETS).map((name) => {
+  const chip = el("button", "chip", name);
+  chip.type = "button";
+  chip.addEventListener("click", () => { $("text").value = PRESETS[name]; textChanged(); });
+  return chip;
+}));
+$("text").value = PRESETS.Directions;
+$("text").addEventListener("input", textChanged);
+$("text").addEventListener("keydown", (event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) speak(); });
+$("speed").addEventListener("input", () => ($("speed-value").textContent = `${$("speed").value} characters per second`));
+$("edit-toggle").addEventListener("click", () => {
+  const open = $("edit").hidden;
+  $("edit").hidden = !open;
+  $("edit-toggle").setAttribute("aria-expanded", String(open));
+  if (open) $("text").focus();
+});
+$("speak").addEventListener("click", () => speak());
+$("resume").addEventListener("click", () => { const rest = restOf(run); if (rest) speak(rest); });
+$("interrupt").addEventListener("click", interrupt);
+$("next").addEventListener("click", () => {
+  const next = nextMode();
+  if (!next) return;
+  document.querySelector(`#modes input[value="${next}"]`).checked = true;
+  speak();
+});
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && isActive()) interrupt(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden && isActive()) run.hidden = true; });
+addEventListener("resize", fitLabels);
+$("send-ms").textContent = SEND_MS;
+renderModes(ORDER);
+textChanged();
+connect();
+</script>
+</body>
+</html>

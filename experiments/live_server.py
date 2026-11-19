@@ -22,7 +22,8 @@ from aiohttp import WSMsgType, web
 
 from speak_as_you_think.live import MODES, Connection, FakeSpeaker
 
-PAGE = Path(__file__).resolve().parent.parent / "web" / "live.html"
+# The page also runs without this server: on a static host it replays recorded runs (docs/live/recordings).
+PAGE = Path(__file__).resolve().parent.parent / "docs" / "live" / "index.html"
 logger = logging.getLogger("live")
 
 
@@ -48,13 +49,18 @@ def load_speaker(args: argparse.Namespace):
     if args.fake:
         return FakeSpeaker()
     # Imported here so that --fake runs without fish-speech or a GPU.
+    import torch
     from week1_run import reference_text
 
     from speak_as_you_think.modes import Drama3, LiveSpeaker, Sampling
+    from speak_as_you_think.seams import SpeechDetector
 
+    # A container is often allowed far fewer CPUs than the host has. One thread per host core gets the
+    # process throttled, and generation slows with it (seen on a 128-core host with a 13-core allowance).
+    torch.set_num_threads(min(torch.get_num_threads(), 8))
     engine = Drama3(args.checkpoint, args.device)
     refs = [engine.reference(args.ref_audio, reference_text(args.ref_audio, args.ref_text))]
-    return LiveSpeaker(engine, refs, Sampling())
+    return LiveSpeaker(engine, refs, Sampling(), detector=SpeechDetector())
 
 
 def warm_up(speaker, executor: ThreadPoolExecutor) -> None:
@@ -99,18 +105,21 @@ def build_app(speaker, executor: ThreadPoolExecutor, args: argparse.Namespace) -
             "modes": list(MODES),
             "chunking": [args.min_chars, args.max_chars],
             "fake": args.fake,
+            "device": speaker.device_name,
         }
         await send(ready, None)
-        async for message in ws:
-            if message.type != WSMsgType.TEXT:
-                continue
-            try:
-                data = json.loads(message.data)
-            except ValueError:
-                await connection.error("messages must be JSON objects")
-                continue
-            await connection.handle(data if isinstance(data, dict) else {})
-        await connection.stop()
+        try:
+            async for message in ws:
+                if message.type != WSMsgType.TEXT:
+                    continue
+                try:
+                    data = json.loads(message.data)
+                except ValueError:
+                    await connection.error("messages must be JSON objects")
+                    continue
+                await connection.handle(data if isinstance(data, dict) else {})
+        finally:
+            await connection.stop()  # whatever ended the socket, the reply must let go of the model
         return ws
 
     app = web.Application()

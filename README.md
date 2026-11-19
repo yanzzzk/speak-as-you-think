@@ -20,6 +20,7 @@ that: with one round of memory the gap is 0.25 s. On one L40 the model decodes a
 about twice real time.
 
 **[Results page with audio](https://yanzzzk.github.io/speak-as-you-think/)** ·
+**[Live demo, replayed from recorded runs](https://yanzzzk.github.io/speak-as-you-think/live/)** ·
 [How to run it](docs/RUNNING.md)
 
 | Median non-speech at the cut | Independent chunks | fish-speech history | Streaming, last round | Streaming, all rounds |
@@ -107,10 +108,17 @@ in English and 14 in Chinese; 3 seeds; 264 chunks per mode).
 
 ## What is next
 
-A session engine for the mode: keep the model's caches between rounds instead of
-re-reading the context per chunk, stream audio frame by frame, and roll the context
-back to the last frame the listener heard when they interrupt. Then a WebSocket
-protocol, a TypeScript client and a recorded live demo.
+A first live demo runs (v0: `experiments/live_server.py` and `docs/live/index.html`, see the
+[run guide](docs/RUNNING.md)). Text goes in over a WebSocket piece by piece, speech
+comes back chunk by chunk, the page measures the gap at each cut with the detector of
+the experiments, and an interruption is answered with what the listener had heard. It
+still re-reads the context for every chunk and sends each chunk whole. Without a server
+the same page replays runs recorded from the model on one H100 (`docs/live/recordings/`).
+
+Next is a session engine for the mode: keep the model's caches between rounds instead
+of re-reading the context per chunk, stream audio frame by frame, and roll the context
+back to the last frame the listener heard when they interrupt. Then a TypeScript
+client and a recorded demo.
 
 ## Layout
 
@@ -122,13 +130,12 @@ speak_as_you_think/
   live.py       a reply as messages: text in, audio chunks out, interruption (no torch)
   modes.py      the synthesis modes (needs fish-speech + GPU)
   scoring.py    text normalization, WER/CER, lookahead leakage (no torch)
-  seams.py      seam kinds and pauses (no torch)
+  seams.py      seam kinds, pauses and the one speech detector behind them (no torch)
   timeline.py   playback timeline and stall metrics (no torch)
 experiments/    run, score and page-build scripts
 scripts/        GPU setup and one-command rounds
 data/           test texts; the reference voice goes in data/ref/ (git-ignored)
-docs/           results page, its data and clips, and the run guide
-web/            the live demo page (v0)
+docs/           results page, its data and clips, the run guide, and live/: the live demo page with recorded runs
 tests/          pytest, runs on a laptop without a GPU
 ```
 

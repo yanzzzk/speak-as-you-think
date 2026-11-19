@@ -11,6 +11,3 @@ result/
 checkpoints/
 data/ref/*
 !data/ref/.gitkeep
-
-# local editor and assistant settings
-.claude/

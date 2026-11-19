@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
+import torchaudio
 from fish_speech.models.text2semantic.fish_omni.chunking import (
     DRAMA3_CHUNK_MAX_NEW_TOKENS,
     Drama3History,
@@ -32,6 +33,7 @@ from fish_speech.models.text2semantic.inference import (
 from speak_as_you_think.encode import check_special_tokens, encode_segments
 from speak_as_you_think.live import Spoken
 from speak_as_you_think.prompts import RefStyle, Reference, Round, streaming_prompt
+from speak_as_you_think.seams import VAD_RATE, SpeechDetector
 
 MODES = ("full", "independent", "fish_history", "streaming")
 
@@ -209,10 +211,13 @@ class LiveSpeaker:
         refs: Sequence[Reference],
         sampling: Sampling,
         speaker_tag: bool = True,
+        detector: SpeechDetector | None = None,
     ) -> None:
         self.engine, self.refs, self.sampling = engine, refs, sampling
         self.speaker_tag = speaker_tag
+        self.detector = detector  # given: each chunk reports the non-speech at its edges
         self.sample_rate = engine.sample_rate
+        self.device_name = torch.cuda.get_device_name(engine.model.device)
         self.begin("streaming-last")
 
     def begin(self, mode: str) -> None:
@@ -257,6 +262,12 @@ class LiveSpeaker:
             "finish_reason": finish,
             "model_s": round(model_s, 3),
         }
+        if self.detector is not None and len(audio):
+            # The pause at a seam is this chunk's trailing plus the next one's leading non-speech.
+            with torch.inference_mode():  # grad mode is per thread: this runs on the speaker's
+                at_vad_rate = torchaudio.functional.resample(audio, self.sample_rate, VAD_RATE)
+            lead, trail = self.detector.edges(at_vad_rate.numpy())
+            info |= {"lead_s": round(lead, 3), "trail_s": round(trail, 3)}
         return Spoken(
             text, lookahead, pcm, len(audio) / self.sample_rate, time.perf_counter() - started, info
         )
